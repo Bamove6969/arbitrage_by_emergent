@@ -28,14 +28,26 @@ if [ -f /opt/ibga/_run_xv.sh ] && grep -q "x11vnc" /opt/ibga/_run_xv.sh 2>/dev/n
 fi
 
 # ---------------------------------------------------------------------------
-# 1. IB Gateway (ibga). It will show a 2FA push on the user's phone after the
-#    Java client comes up. The API port (4001) opens once 2FA is approved.
+# 1. IB Gateway (ibga). Triggers the IBKey 2FA push to the user's phone.
+#    The API port (4001) opens once the push is approved. IBKR only honours
+#    one push at a time -- if the user misses it (~2 min window), the
+#    login attempt expires and a fresh push has to be sent. We do that
+#    here by restarting the ibga manager.
 # ---------------------------------------------------------------------------
+TWO_FA_WINDOW="${TWO_FA_WINDOW:-120}"      # seconds before we re-send the push
+MAX_2FA_RETRIES="${MAX_2FA_RETRIES:-5}"    # how many pushes total before giving up
+
+start_ibga() {
+    /opt/ibga/manager.sh >> "$LOG_DIR/ibga.log" 2>&1 &
+    IBGA_PID=$!
+    echo "    ibga manager up (PID $IBGA_PID)"
+    sleep 15  # let Xvfb + Java boot before we start watching the port
+}
+
 echo "[1/5] Starting IB Gateway (ibga manager)..."
-/opt/ibga/manager.sh > "$LOG_DIR/ibga.log" 2>&1 &
-IBGA_PID=$!
-sleep 15
-echo "    ibga manager booted (PID $IBGA_PID, log: $LOG_DIR/ibga.log)"
+echo "      2FA push will go to your phone; you have ${TWO_FA_WINDOW}s per attempt."
+start_ibga
+echo "    ibga manager booted (log: $LOG_DIR/ibga.log)"
 
 # ---------------------------------------------------------------------------
 # 2. Ollama
@@ -92,22 +104,36 @@ EXECUTOR_PID=$!
 sleep 3
 
 # ---------------------------------------------------------------------------
-# 5. Optional barrier: wait for ibga's 4001 to open (2FA-gated). Backend can
-#    boot before this, but the scanner will block on TWS connect until 4001
-#    is up, so giving the loop here makes the log easier to read.
+# 5. Wait for the 2FA gate at localhost:4001. Re-send the push every
+#    TWO_FA_WINDOW seconds (default 120s) up to MAX_2FA_RETRIES attempts.
 # ---------------------------------------------------------------------------
-IBGA_WAIT_TIMEOUT="${IBGA_WAIT_TIMEOUT:-600}"
-echo "[5/5] Waiting up to ${IBGA_WAIT_TIMEOUT}s for IBKR API at localhost:4001 (approve 2FA on your phone)..."
-deadline=$(( $(date +%s) + IBGA_WAIT_TIMEOUT ))
-while ! nc -z localhost 4001 2>/dev/null; do
-    if [ "$(date +%s)" -ge "$deadline" ]; then
-        echo "    WARN: IBKR API not up after ${IBGA_WAIT_TIMEOUT}s; backend will retry on each scan"
-        break
+echo "[5/5] Waiting on IBKR 2FA approval (localhost:4001)..."
+
+ibga_up=0
+for attempt in $(seq 1 "$MAX_2FA_RETRIES"); do
+    echo "    [push ${attempt}/${MAX_2FA_RETRIES}] approve the IBKey notification on your phone within ${TWO_FA_WINDOW}s"
+    deadline=$(( $(date +%s) + TWO_FA_WINDOW ))
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+        if nc -z localhost 4001 2>/dev/null; then
+            ibga_up=1
+            echo "    IBKR API armed (push #${attempt} approved)"
+            break
+        fi
+        sleep 2
+    done
+    [ "$ibga_up" -eq 1 ] && break
+
+    if [ "$attempt" -lt "$MAX_2FA_RETRIES" ]; then
+        echo "    no approval in ${TWO_FA_WINDOW}s; restarting ibga to send a fresh push..."
+        kill "$IBGA_PID" 2>/dev/null || true
+        wait "$IBGA_PID" 2>/dev/null || true
+        sleep 3
+        start_ibga
     fi
-    sleep 3
 done
-if nc -z localhost 4001 2>/dev/null; then
-    echo "    IBKR API armed"
+
+if [ "$ibga_up" -ne 1 ]; then
+    echo "    WARN: IBKR API still not up after ${MAX_2FA_RETRIES} pushes; backend will retry on each scan"
 fi
 
 # Cleanup on exit
