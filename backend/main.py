@@ -108,8 +108,8 @@ async def websocket_endpoint(websocket: WebSocket):
 
             elif msg_type == "subscribe" and msg.get("channel") == "markets":
                 # Colab requests market data — send all current markets
-                from backend.scanner import get_all_markets
-                markets = get_all_markets()
+                from backend.scanner import get_cached_markets
+                markets = get_cached_markets()
                 await websocket.send_json({"type": "markets_data", "markets": markets, "count": len(markets)})
                 logger.info(f"Sent {len(markets)} markets to Colab via WebSocket")
 
