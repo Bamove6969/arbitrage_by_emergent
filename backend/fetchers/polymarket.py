@@ -8,8 +8,8 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 POLYMARKET_GAMMA_API = "https://gamma-api.polymarket.com"
-PAGE_SIZE = 500
-MAX_PAGES = 200
+PAGE_SIZE = 100   # Gamma API hard-caps at 100 per page; higher values silently truncate
+MAX_PAGES = 300   # 100 * 300 = 30k market ceiling
 
 
 async def fetch_polymarket_markets(limit: int = 50000, on_progress: callable = None) -> List[Dict[str, Any]]:

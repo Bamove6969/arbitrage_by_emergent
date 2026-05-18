@@ -198,6 +198,12 @@ async def reset_scan():
     return {"status": "reset", "message": "Scan state reset"}
 
 
+@app.get("/api/health")
+async def health():
+    """Container healthcheck endpoint."""
+    return {"status": "ok", "service": "arbitrage-backend"}
+
+
 @app.post("/api/scan")
 async def trigger_scan(request: Request = None):
     try:
