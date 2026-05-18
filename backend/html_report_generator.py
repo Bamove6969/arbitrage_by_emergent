@@ -1,394 +1,314 @@
 """
-Interactive HTML Report Generator
-Creates visually pleasing reports with Plotly.js, collapsible sections, and clickable links
+HTML Report Generator
+Creates a clean, attractive single-page report of confirmed arbitrage matches.
 """
 import logging
-from typing import List, Dict, Any
-from datetime import datetime
 import json
+from typing import List, Dict, Any, Optional
+from datetime import datetime
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
-def generate_html_report(matches: List[Dict[str, Any]], output_path: str = None) -> str:
+def _fmt_pct(v: Any) -> str:
+    try:
+        return f"{float(v) * 100:.1f}%"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _fmt_roi(v: Any) -> str:
+    try:
+        return f"{float(v):.2f}%"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _fmt_score(v: Any) -> str:
+    try:
+        return f"{float(v):.1f}"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _fmt_date(v: Any) -> str:
+    if not v:
+        return "No end date"
+    s = str(v)
+    # Try to keep just the date part if ISO-like
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s[:len(fmt) if "%" not in fmt[-3:] else 19], fmt).strftime("%b %d, %Y")
+        except (ValueError, TypeError):
+            continue
+    return s[:10] if len(s) >= 10 else s
+
+
+def _platform_chip_classes(platform: str) -> str:
+    p = (platform or "").lower()
+    if "poly" in p:
+        return "bg-indigo-100 text-indigo-800 ring-indigo-200"
+    if "predict" in p:
+        return "bg-amber-100 text-amber-800 ring-amber-200"
+    if "ibkr" in p or "interactive" in p:
+        return "bg-rose-100 text-rose-800 ring-rose-200"
+    return "bg-slate-100 text-slate-800 ring-slate-200"
+
+
+def _roi_classes(roi: Any) -> str:
+    try:
+        r = float(roi)
+    except (TypeError, ValueError):
+        return "bg-slate-50 text-slate-700 ring-slate-200"
+    if r >= 10:
+        return "bg-emerald-100 text-emerald-900 ring-emerald-300"
+    if r >= 5:
+        return "bg-green-100 text-green-900 ring-green-300"
+    if r >= 1:
+        return "bg-lime-100 text-lime-900 ring-lime-300"
+    return "bg-slate-100 text-slate-700 ring-slate-200"
+
+
+def _esc(s: Any) -> str:
+    if s is None:
+        return ""
+    return (
+        str(s)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&#39;")
+    )
+
+
+def _sort_key(m: Dict[str, Any]):
+    end = m.get("earliestEndDate") or m.get("marketA", {}).get("endDate") or "9999-12-31"
+    try:
+        roi = -float(m.get("roi", 0) or 0)
+    except (TypeError, ValueError):
+        roi = 0.0
+    return (str(end), roi)
+
+
+def _market_block(market: Dict[str, Any], label: str) -> str:
+    platform = market.get("platform", "Unknown")
+    title = market.get("title", "(no title)")
+    yes_p = _fmt_pct(market.get("yesPrice"))
+    no_p = _fmt_pct(market.get("noPrice"))
+    url = market.get("url")
+    end_date = _fmt_date(market.get("endDate"))
+    chip = _platform_chip_classes(platform)
+
+    if url:
+        button = (
+            f'<a href="{_esc(url)}" target="_blank" rel="noopener noreferrer" '
+            f'class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium '
+            f'bg-slate-900 text-white hover:bg-slate-700 transition shadow-sm">'
+            f'Open on {_esc(platform)} <span aria-hidden="true">&#8599;</span></a>'
+        )
+    else:
+        button = (
+            '<button disabled class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg '
+            'text-sm font-medium bg-slate-200 text-slate-400 cursor-not-allowed">'
+            f'No link for {_esc(platform)}</button>'
+        )
+
+    return f"""
+      <div class="flex-1 min-w-0 p-5 bg-white rounded-xl ring-1 ring-slate-200 flex flex-col gap-3">
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-[11px] uppercase tracking-wider font-semibold text-slate-400">{_esc(label)}</span>
+          <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ring-1 {chip}">
+            {_esc(platform)}
+          </span>
+        </div>
+        <p class="text-base font-medium text-slate-900 leading-snug">{_esc(title)}</p>
+        <div class="flex items-center gap-2 text-sm">
+          <span class="inline-flex items-center px-2 py-1 rounded-md bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200 font-mono">YES {yes_p}</span>
+          <span class="inline-flex items-center px-2 py-1 rounded-md bg-rose-50 text-rose-800 ring-1 ring-rose-200 font-mono">NO {no_p}</span>
+        </div>
+        <div class="text-xs text-slate-500">Ends: {_esc(end_date)}</div>
+        <div class="mt-auto pt-2">{button}</div>
+      </div>
     """
-    Generate an interactive HTML report with:
-    - Collapsible sections for each match
-    - Exact question text as displayed on each site
-    - Two blue clickable links to the original questions
-    - Plotly.js visualizations
-    - Modern, clean styling
+
+
+def _match_card(idx: int, m: Dict[str, Any]) -> str:
+    a = m.get("marketA", {}) or {}
+    b = m.get("marketB", {}) or {}
+    roi = m.get("roi")
+    score = m.get("matchScore")
+    explanation = m.get("explanation") or "No explanation provided."
+    model = m.get("model") or ""
+    worker = m.get("worker") or ""
+    roi_cls = _roi_classes(roi)
+    earliest = _fmt_date(m.get("earliestEndDate") or a.get("endDate") or b.get("endDate"))
+
+    meta_bits = []
+    if model:
+        meta_bits.append(f"model: {_esc(model)}")
+    if worker:
+        meta_bits.append(f"worker: {_esc(worker)}")
+    meta = " &middot; ".join(meta_bits)
+
+    return f"""
+    <article class="group bg-gradient-to-br from-white to-slate-50 rounded-2xl ring-1 ring-slate-200 shadow-sm hover:shadow-md hover:ring-slate-300 transition p-5 sm:p-6"
+             x-data="{{ open: false }}">
+      <header class="flex flex-wrap items-center gap-3 mb-4">
+        <span class="text-xs font-semibold text-slate-400">#{idx}</span>
+        <span class="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-bold ring-1 {roi_cls}">
+          ROI {_fmt_roi(roi)}
+        </span>
+        <span class="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-semibold bg-sky-50 text-sky-800 ring-1 ring-sky-200">
+          Match {_fmt_score(score)}
+        </span>
+        <span class="ml-auto text-xs text-slate-500">Earliest end: <span class="font-medium text-slate-700">{_esc(earliest)}</span></span>
+      </header>
+
+      <div class="flex flex-col md:flex-row gap-4">
+        {_market_block(a, "Market A")}
+        <div class="flex md:flex-col items-center justify-center text-slate-300 font-bold select-none">
+          <span class="text-2xl">&harr;</span>
+        </div>
+        {_market_block(b, "Market B")}
+      </div>
+
+      <div class="mt-5">
+        <button @click="open = !open"
+                class="inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 transition">
+          <span x-text="open ? '▾' : '▸'" class="font-mono w-3 inline-block"></span>
+          <span>Why these match</span>
+        </button>
+        <div x-show="open" x-collapse x-cloak class="mt-3 p-4 bg-slate-50 rounded-lg ring-1 ring-slate-200 text-sm text-slate-700 leading-relaxed">
+          <p>{_esc(explanation)}</p>
+          {f'<p class="mt-2 text-xs text-slate-400">{meta}</p>' if meta else ''}
+        </div>
+      </div>
+    </article>
     """
-    
+
+
+def generate_html_report(matches: List[Dict[str, Any]], output_path: Optional[str] = None) -> str:
+    """Render a clean, self-contained HTML report of confirmed arbitrage matches."""
+    matches = list(matches or [])
+    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    total = len(matches)
+
+    if total:
+        rois = [float(m.get("roi", 0) or 0) for m in matches]
+        scores = [float(m.get("matchScore", 0) or 0) for m in matches]
+        avg_roi = sum(rois) / len(rois) if rois else 0.0
+        avg_score = sum(scores) / len(scores) if scores else 0.0
+        max_roi = max(rois) if rois else 0.0
+    else:
+        avg_roi = avg_score = max_roi = 0.0
+
+    sorted_matches = sorted(matches, key=_sort_key)
+
+    if not sorted_matches:
+        body = """
+        <div class="max-w-2xl mx-auto mt-20 text-center">
+          <div class="text-6xl mb-4">&#128269;</div>
+          <h2 class="text-2xl font-semibold text-slate-800 mb-2">No confirmed matches yet</h2>
+          <p class="text-slate-500">When the workers confirm an arbitrage opportunity, it will show up here.</p>
+        </div>
+        """
+    else:
+        cards = "\n".join(_match_card(i + 1, m) for i, m in enumerate(sorted_matches))
+        body = f'<div class="grid grid-cols-1 gap-5">{cards}</div>'
+
+    stats_html = f"""
+      <dl class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mt-6">
+        <div class="rounded-xl bg-white ring-1 ring-slate-200 px-4 py-3">
+          <dt class="text-xs font-medium text-slate-500 uppercase tracking-wider">Matches</dt>
+          <dd class="mt-1 text-2xl font-semibold text-slate-900">{total}</dd>
+        </div>
+        <div class="rounded-xl bg-white ring-1 ring-slate-200 px-4 py-3">
+          <dt class="text-xs font-medium text-slate-500 uppercase tracking-wider">Avg ROI</dt>
+          <dd class="mt-1 text-2xl font-semibold text-emerald-700">{avg_roi:.2f}%</dd>
+        </div>
+        <div class="rounded-xl bg-white ring-1 ring-slate-200 px-4 py-3">
+          <dt class="text-xs font-medium text-slate-500 uppercase tracking-wider">Max ROI</dt>
+          <dd class="mt-1 text-2xl font-semibold text-emerald-700">{max_roi:.2f}%</dd>
+        </div>
+        <div class="rounded-xl bg-white ring-1 ring-slate-200 px-4 py-3">
+          <dt class="text-xs font-medium text-slate-500 uppercase tracking-wider">Avg Match</dt>
+          <dd class="mt-1 text-2xl font-semibold text-sky-700">{avg_score:.1f}</dd>
+        </div>
+      </dl>
+    """
+
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Arbitrage Match Report - {datetime.now().strftime('%Y-%m-%d %H:%M')}</title>
-    
-    <!-- Plotly.js -->
-    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
-    
-    <!-- Tailwind CSS for styling -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- Alpine.js for interactivity -->
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.3/dist/cdn.min.js"></script>
-    
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-        
-        body {{
-            font-family: 'Inter', sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-        }}
-        
-        .match-card {{
-            transition: all 0.3s ease;
-        }}
-        
-        .match-card:hover {{
-            transform: translateY(-2px);
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
-        }}
-        
-        .site-link {{
-            color: #2563eb;
-            text-decoration: none;
-            font-weight: 500;
-            transition: all 0.2s;
-            display: inline-flex;
-            align-items: center;
-            gap: 0.25rem;
-        }}
-        
-        .site-link:hover {{
-            color: #1d4ed8;
-            text-decoration: underline;
-        }}
-        
-        .site-link::after {{
-            content: '↗';
-            font-size: 0.8em;
-        }}
-        
-        .collapsible-content {{
-            max-height: 0;
-            overflow: hidden;
-            transition: max-height 0.3s ease;
-        }}
-        
-        .collapsible-content.open {{
-            max-height: 2000px;
-        }}
-        
-        .roi-badge {{
-            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-        }}
-        
-        .verified-badge {{
-            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-        }}
-        
-        .platform-tag {{
-            background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
-        }}
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Arbitrage Match Report - {generated_at}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/collapse@3.x.x/dist/cdn.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak] {{ display: none !important; }}
+    body {{ font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }}
+  </style>
 </head>
-<body class="p-8">
-    <div class="max-w-7xl mx-auto" x-data="reportApp()">
-        <!-- Header -->
-        <div class="bg-white rounded-2xl shadow-2xl p-8 mb-8">
-            <div class="flex items-center justify-between mb-4">
-                <div>
-                    <h1 class="text-4xl font-bold text-gray-900 mb-2">
-                        🔍 Arbitrage Match Report
-                    </h1>
-                    <p class="text-gray-600">
-                        Generated: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}
-                    </p>
-                </div>
-                <div class="text-right">
-                    <div class="text-5xl font-bold text-blue-600">{len(matches)}</div>
-                    <div class="text-gray-500">Exact Matches</div>
-                </div>
-            </div>
-            
-            <!-- Stats Overview -->
-            <div class="grid grid-cols-4 gap-4 mt-6">
-                <div class="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-4">
-                    <div class="text-2xl font-bold text-blue-600" x-text="stats.avgROI"></div>
-                    <div class="text-sm text-blue-700">Avg ROI</div>
-                </div>
-                <div class="bg-gradient-to-br from-green-50 to-green-100 rounded-xl p-4">
-                    <div class="text-2xl font-bold text-green-600" x-text="stats.highestROI"></div>
-                    <div class="text-sm text-green-700">Highest ROI</div>
-                </div>
-                <div class="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl p-4">
-                    <div class="text-2xl font-bold text-purple-600" x-text="stats.verifiedCount"></div>
-                    <div class="text-sm text-purple-700">LLM Verified</div>
-                </div>
-                <div class="bg-gradient-to-br from-orange-50 to-orange-100 rounded-xl p-4">
-                    <div class="text-2xl font-bold text-orange-600" x-text="stats.platformsCount"></div>
-                    <div class="text-sm text-orange-700">Platforms</div>
-                </div>
-            </div>
-            
-            <!-- ROI Distribution Chart -->
-            <div class="mt-6">
-                <div id="roi-chart" class="w-full h-64"></div>
-            </div>
+<body class="bg-slate-100 text-slate-900 min-h-screen">
+  <div class="max-w-6xl mx-auto px-4 sm:px-6 py-8 sm:py-10">
+    <header class="mb-8">
+      <div class="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 class="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900">
+            Arbitrage Match Report
+          </h1>
+          <p class="mt-1 text-sm text-slate-500">
+            Confirmed binary exact-matches across prediction markets.
+          </p>
         </div>
-        
-        <!-- Filters -->
-        <div class="bg-white rounded-xl shadow-lg p-4 mb-6">
-            <div class="flex gap-4 items-center">
-                <input 
-                    type="text" 
-                    x-model="searchQuery"
-                    placeholder="🔎 Search questions..."
-                    class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                <input 
-                    type="number" 
-                    x-model.number="minROI"
-                    placeholder="Min ROI %"
-                    class="w-32 px-4 py-2 border border-gray-300 rounded-lg"
-                >
-                <select x-model="platformFilter" class="px-4 py-2 border border-gray-300 rounded-lg">
-                    <option value="">All Platforms</option>
-                    <template x-for="platform in platforms" :key="platform">
-                        <option :value="platform" x-text="platform"></option>
-                    </template>
-                </select>
-                <button 
-                    @click="expandAll = !expandAll"
-                    class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                >
-                    <span x-text="expandAll ? 'Collapse All' : 'Expand All'"></span>
-                </button>
-            </div>
+        <div class="text-right text-sm text-slate-500">
+          <div>Generated</div>
+          <div class="font-mono text-slate-700">{generated_at}</div>
         </div>
-        
-        <!-- Match Cards -->
-        <div class="space-y-4">
-            <template x-for="(match, index) in filteredMatches" :key="index">
-                <div class="match-card bg-white rounded-xl shadow-lg overflow-hidden">
-                    <!-- Card Header (Always Visible) -->
-                    <div class="p-6 bg-gradient-to-r from-gray-50 to-white">
-                        <div class="flex items-start justify-between">
-                            <div class="flex-1">
-                                <div class="flex items-center gap-3 mb-3">
-                                    <span class="roi-badge text-white px-3 py-1 rounded-full text-sm font-semibold">
-                                        <span x-text="match.original_roi.toFixed(2) + '% ROI'"></span>
-                                    </span>
-                                    <template x-if="match.isMatch">
-                                        <span class="verified-badge text-white px-3 py-1 rounded-full text-sm font-semibold">
-                                            ✓ LLM Verified
-                                        </span>
-                                    </template>
-                                </div>
-                                
-                                <!-- Site A -->
-                                <div class="mb-4">
-                                    <div class="flex items-center gap-2 mb-2">
-                                        <span class="platform-tag px-2 py-1 rounded text-xs font-medium" x-text="match.marketA.platform"></span>
-                                        <a :href="match.marketA.url" target="_blank" class="site-link">
-                                            View on {match.marketA.platform || 'Site'}
-                                        </a>
-                                    </div>
-                                    <p class="text-gray-800 font-medium" x-text="match.marketA.title"></p>
-                                    <p class="text-sm text-gray-600 mt-1">
-                                        Yes Price: <span class="font-semibold" x-text="(match.marketA.yesPrice * 100).toFixed(2) + '%'"></span>
-                                    </p>
-                                </div>
-                                
-                                <!-- Site B -->
-                                <div>
-                                    <div class="flex items-center gap-2 mb-2">
-                                        <span class="platform-tag px-2 py-1 rounded text-xs font-medium" x-text="match.marketB.platform"></span>
-                                        <a :href="match.marketB.url" target="_blank" class="site-link">
-                                            View on {match.marketB.platform || 'Site'}
-                                        </a>
-                                    </div>
-                                    <p class="text-gray-800 font-medium" x-text="match.marketB.title"></p>
-                                    <p class="text-sm text-gray-600 mt-1">
-                                        Yes Price: <span class="font-semibold" x-text="(match.marketB.yesPrice * 100).toFixed(2) + '%'"></span>
-                                    </p>
-                                </div>
-                            </div>
-                            
-                            <button 
-                                @click="toggleExpand(index)"
-                                class="ml-4 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-                            >
-                                <span x-text="match.expanded ? '▼' : '▶'"></span>
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <!-- Collapsible Details -->
-                    <div class="collapsible-content" :class="{{ 'open': match.expanded }}">
-                        <div class="p-6 bg-gray-50 border-t">
-                            <div class="grid grid-cols-2 gap-6">
-                                <!-- LLM Analysis -->
-                                <div>
-                                    <h4 class="font-semibold text-gray-700 mb-2">🤖 LLM Analysis</h4>
-                                    <p class="text-sm text-gray-600" x-text="match.explanation || match.semantic_analysis?.differences?.join(', ') || 'Questions are semantically identical'"></p>
-                                </div>
-                                
-                                <!-- Match Details -->
-                                <div>
-                                    <h4 class="font-semibold text-gray-700 mb-2">📊 Match Details</h4>
-                                    <div class="text-sm text-gray-600 space-y-1">
-                                        <div>Model: <span class="font-medium" x-text="match.model || 'N/A'"></span></div>
-                                        <div>Match Score: <span class="font-medium" x-text="(match.match_score || match.semantic_analysis?.similarity_score || 0).toFixed(2)"></span></div>
-                                        <div>Worker: <span class="font-medium" x-text="match.worker || 'N/A'"></span></div>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <!-- Arbitrage Calculation -->
-                            <div class="mt-4 p-4 bg-white rounded-lg">
-                                <h4 class="font-semibold text-gray-700 mb-2">💰 Arbitrage Calculation</h4>
-                                <div class="grid grid-cols-3 gap-4 text-sm">
-                                    <div>
-                                        <div class="text-gray-600">Combined Cost</div>
-                                        <div class="font-semibold text-gray-900" x-text="calculateCost(match)"></div>
-                                    </div>
-                                    <div>
-                                        <div class="text-gray-600">Guaranteed Return</div>
-                                        <div class="font-semibold text-green-600">$1.00</div>
-                                    </div>
-                                    <div>
-                                        <div class="text-gray-600">Profit Margin</div>
-                                        <div class="font-semibold text-green-600" x-text="match.original_roi.toFixed(2) + '%'"></div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </template>
-        </div>
-        
-        <!-- Empty State -->
-        <div x-show="filteredMatches.length === 0" class="text-center py-12">
-            <div class="text-6xl mb-4">🔍</div>
-            <h3 class="text-xl font-semibold text-white mb-2">No matches found</h3>
-            <p class="text-white/80">Try adjusting your filters</p>
-        </div>
-    </div>
-    
-    <script>
-        function reportApp() {{
-            return {{
-                matches: {json.dumps(matches[:100])},  // Limit initial load
-                searchQuery: '',
-                minROI: 0,
-                platformFilter: '',
-                expandAll: false,
-                platforms: {json.dumps(list(set([m['marketA']['platform'] for m in matches] + [m['marketB']['platform'] for m in matches])))},
-                
-                get stats() {{
-                    const rois = this.matches.map(m => m.original_roi);
-                    return {{
-                        avgROI: (rois.reduce((a, b) => a + b, 0) / rois.length).toFixed(2) + '%',
-                        highestROI: Math.max(...rois).toFixed(2) + '%',
-                        verifiedCount: this.matches.filter(m => m.isMatch).length,
-                        platformsCount: this.platforms.length
-                    }};
-                }},
-                
-                get filteredMatches() {{
-                    return this.matches.filter(match => {{
-                        const matchesSearch = this.searchQuery === '' || 
-                            match.marketA.title.toLowerCase().includes(this.searchQuery.toLowerCase()) ||
-                            match.marketB.title.toLowerCase().includes(this.searchQuery.toLowerCase());
-                        
-                        const matchesROI = match.original_roi >= this.minROI;
-                        
-                        const matchesPlatform = this.platformFilter === '' ||
-                            match.marketA.platform === this.platformFilter ||
-                            match.marketB.platform === this.platformFilter;
-                        
-                        return matchesSearch && matchesROI && matchesPlatform;
-                    }});
-                }},
-                
-                toggleExpand(index) {{
-                    this.matches[index].expanded = !this.matches[index].expanded;
-                }},
-                
-                calculateCost(match) {{
-                    const cost = match.marketA.yesPrice + (1 - match.marketB.yesPrice);
-                    return '$' + cost.toFixed(4);
-                }},
-                
-                init() {{
-                    // Initialize Plotly chart
-                    const rois = this.matches.map(m => m.original_roi);
-                    const trace = {{
-                        x: rois,
-                        type: 'histogram',
-                        marker: {{
-                            color: '#3b82f6',
-                            opacity: 0.7
-                        }},
-                        nbinsx: 30
-                    }};
-                    
-                    const layout = {{
-                        title: 'ROI Distribution',
-                        xaxis: {{ title: 'ROI (%)' }},
-                        yaxis: {{ title: 'Count' }},
-                        margin: {{ t: 40, b: 40, l: 40, r: 40 }},
-                        paper_bgcolor: 'rgba(0,0,0,0)',
-                        plot_bgcolor: 'rgba(0,0,0,0)'
-                    }};
-                    
-                    Plotly.newPlot('roi-chart', [trace], layout, {{displayModeBar: false}});
-                }}
-            }}
-        }}
-    </script>
+      </div>
+      {stats_html}
+    </header>
+
+    <main>
+      {body}
+    </main>
+
+    <footer class="mt-12 pt-6 border-t border-slate-200 text-xs text-slate-400 text-center">
+      Arbitrage Calculator &middot; {total} match{'es' if total != 1 else ''} &middot; {generated_at}
+    </footer>
+  </div>
 </body>
-</html>"""
-    
-    # Save to file if path provided
+</html>
+"""
+
     if output_path:
-        with open(output_path, 'w', encoding='utf-8') as f:
-            f.write(html)
-        logger.info(f"HTML report saved to: {output_path}")
-    
+        try:
+            p = Path(output_path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(html, encoding="utf-8")
+            logger.info(f"HTML report written to {p}")
+        except Exception as e:
+            logger.error(f"Failed to write HTML report to {output_path}: {e}")
+
     return html
 
 
-if __name__ == "__main__":
-    # Test with sample data
-    test_matches = [
-        {
-            "marketA": {
-                "title": "Will Bitcoin reach $100,000 by December 2025?",
-                "platform": "Polymarket",
-                "yesPrice": 0.42,
-                "url": "https://polymarket.com/event/bitcoin-100k"
-            },
-            "marketB": {
-                "title": "Bitcoin to hit $100K before 2026",
-                "platform": "PredictIt",
-                "yesPrice": 0.38,
-                "url": "https://predictit.org/market/btc-100k"
-            },
-            "original_roi": 21.05,
-            "isMatch": True,
-            "match_score": 0.95,
-            "explanation": "Both questions ask about Bitcoin reaching $100,000 before 2026",
-            "expanded": False
-        }
-    ]
-    
-    html = generate_html_report(test_matches, "/tmp/test_report.html")
-    print(f"Generated report with {len(test_matches)} matches")
+def get_latest_report_path(reports_dir: str = "/app/reports") -> Optional[str]:
+    """Return the path to the most recent arbitrage_report_*.html file, or None."""
+    try:
+        d = Path(reports_dir)
+        if not d.is_dir():
+            return None
+        candidates = sorted(
+            d.glob("arbitrage_report_*.html"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        return str(candidates[0]) if candidates else None
+    except Exception as e:
+        logger.error(f"Failed to locate latest report in {reports_dir}: {e}")
+        return None

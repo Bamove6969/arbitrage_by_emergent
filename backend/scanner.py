@@ -146,7 +146,7 @@ def set_cloud_results(results: List[Dict[str, Any]], clear: bool = True):
     logger.info(f"Saved {len(top_k)} results to {results_file}")
     
     _all_opportunities.extend(top_k)
-    
+
     scan_state["progress"] = 100
     scan_state["phase"] = "Cloud match complete"
     scan_state["status"] = "complete"
@@ -155,8 +155,79 @@ def set_cloud_results(results: List[Dict[str, Any]], clear: bool = True):
 
     scan_state["is_scanning"] = False
     _broadcast_state()  # Final broadcast
-    
+
     logger.info(f"Cloud results synced! Top {TOP_K} prioritized. Total ops: {len(_all_opportunities)}")
+
+    # Kick off LLM verification + report generation in the background so the
+    # caller (the /ws cloud_results handler) can ack Colab without blocking.
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop.create_task(_verify_and_report(top_k))
+        else:
+            logger.warning("No running event loop -- skipping LLM verification kickoff")
+    except RuntimeError:
+        logger.warning("No event loop in this thread -- skipping LLM verification kickoff")
+
+
+async def _verify_and_report(matches: List[Dict[str, Any]]):
+    """
+    Post-Colab pipeline: 2 gemma workers verify the 2000 matches in parallel,
+    then a comprehensive HTML report is written to /app/reports/.
+    """
+    global _llm_verified_matches, _latest_report_path
+    try:
+        from backend.llm_parallel_workers import run_parallel_llm_verification
+        from backend.html_report_generator import generate_html_report
+        from datetime import datetime
+        from pathlib import Path
+
+        scan_state["phase"] = "LLM verification"
+        scan_state["message"] = f"Two Gemma workers analysing {len(matches)} matches..."
+        _broadcast_state()
+
+        verified = await run_parallel_llm_verification(matches)
+        confirmed = [v for v in verified if v.get("isMatch")]
+
+        scan_state["phase"] = "Generating report"
+        scan_state["message"] = f"Confirmed {len(confirmed)} exact matches -- writing report..."
+        _broadcast_state()
+
+        reports_dir = Path("/app/reports")
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        out_path = reports_dir / f"arbitrage_report_{ts}.html"
+        generate_html_report(confirmed, str(out_path))
+
+        _llm_verified_matches = confirmed
+        _latest_report_path = str(out_path)
+
+        scan_state["phase"] = "Report ready"
+        scan_state["message"] = f"{len(confirmed)} confirmed matches. Report: {out_path.name}"
+        scan_state["confirmed_matches"] = len(confirmed)
+        scan_state["latest_report"] = out_path.name
+        _broadcast_state()
+
+        logger.info(f"Pipeline complete: {len(confirmed)} confirmed matches -> {out_path}")
+    except Exception as e:
+        logger.error(f"LLM verification / report generation failed: {e}", exc_info=True)
+        scan_state["phase"] = "Report failed"
+        scan_state["message"] = f"LLM pipeline error: {e}"
+        _broadcast_state()
+
+
+# Stateful holders for the verified matches and the most recent report path,
+# exposed via /api/llm-matches and /api/report/latest in main.py.
+_llm_verified_matches: List[Dict[str, Any]] = []
+_latest_report_path: Optional[str] = None
+
+
+def get_llm_verified_matches() -> List[Dict[str, Any]]:
+    return _llm_verified_matches
+
+
+def get_latest_report_path() -> Optional[str]:
+    return _latest_report_path
 
 
 async def refresh_top_leads(limit: int = 20):

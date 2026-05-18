@@ -204,6 +204,32 @@ async def health():
     return {"status": "ok", "service": "arbitrage-backend"}
 
 
+@app.get("/api/llm-matches")
+async def llm_matches():
+    """Confirmed binary exact-matches after the two-gemma verification pass."""
+    from backend.scanner import get_llm_verified_matches
+    return {"matches": get_llm_verified_matches()}
+
+
+@app.get("/api/report/latest")
+async def latest_report():
+    """Serves the most recent arbitrage HTML report. Reachable through the ngrok tunnel."""
+    from fastapi.responses import HTMLResponse, JSONResponse
+    from backend.scanner import get_latest_report_path
+    from backend.html_report_generator import get_latest_report_path as fs_latest
+    path = get_latest_report_path() or fs_latest("/app/reports")
+    if not path:
+        return JSONResponse(
+            {"status": "no_report", "message": "No report generated yet. Trigger a scan first."},
+            status_code=404,
+        )
+    try:
+        with open(path, "r") as f:
+            return HTMLResponse(f.read())
+    except FileNotFoundError:
+        return JSONResponse({"status": "missing", "path": path}, status_code=404)
+
+
 @app.post("/api/scan")
 async def trigger_scan(request: Request = None):
     try:

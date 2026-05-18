@@ -5,9 +5,14 @@ Uses natural language to identify identically-worded questions across platforms
 """
 import asyncio
 import logging
+import os
+import re
 from typing import List, Dict, Any, Tuple
 from concurrent.futures import ThreadPoolExecutor
 import httpx
+
+MATCH_YES_RE = re.compile(r"^MATCH:\s*YES", re.MULTILINE | re.IGNORECASE)
+EXPLANATION_RE = re.compile(r"^Explanation:\s*(.+?)(?:\n\s*\n|\Z)", re.MULTILINE | re.IGNORECASE | re.DOTALL)
 
 logger = logging.getLogger(__name__)
 
@@ -114,9 +119,13 @@ Your response:"""
                 result = response.json()
                 output = result.get("response", "")
                 
-                # Parse response
-                is_match = "MATCH: YES" in output.upper()
-                return is_match, output
+                is_match = bool(MATCH_YES_RE.search(output))
+                explanation_match = EXPLANATION_RE.search(output)
+                if explanation_match:
+                    explanation = explanation_match.group(1).strip().strip("`").strip()
+                else:
+                    explanation = output.strip().strip("`").strip()
+                return is_match, explanation
                 
         except Exception as e:
             logger.error(f"{self.worker_id} - Ollama query failed: {e}")
@@ -243,26 +252,17 @@ class ParallelLLMProcessor:
         self.results = []
         
     def setup_workers(self):
-        """Initialize 4 workers: 2 Gemma4 + 2 Qwen3.5"""
+        model_name = os.environ.get("OLLAMA_MODEL", "gemma4:31b-cloud")
         self.workers = [
-            LLMWorker("gemma-worker-1", "gemma4:31b-cloud"),
-            LLMWorker("gemma-worker-2", "gemma4:31b-cloud"),
-            LLMWorker("qwen-worker-1", "qwen3.5:397b-cloud"),
-            LLMWorker("qwen-worker-2", "qwen3.5:397b-cloud"),
+            LLMWorker("gemma-worker-1", model_name),
+            LLMWorker("gemma-worker-2", model_name),
         ]
-        logger.info(f"Initialized {len(self.workers)} workers")
-        
+        logger.info(f"Initialized {len(self.workers)} workers with model {model_name}")
+
     def split_batches(self, pairs: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
-        """Split 2000 pairs into 4 batches of 500 each"""
-        batch_size = len(pairs) // 4
-        batches = []
-        
-        for i in range(4):
-            start = i * batch_size
-            end = start + batch_size if i < 3 else len(pairs)
-            batches.append(pairs[start:end])
-        
-        logger.info(f"Split {len(pairs)} pairs into 4 batches: {[len(b) for b in batches]}")
+        mid = len(pairs) // 2
+        batches = [pairs[:mid], pairs[mid:]]
+        logger.info(f"Split {len(pairs)} pairs into 2 batches: {[len(b) for b in batches]}")
         return batches
     
     async def process_all(self, pairs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
