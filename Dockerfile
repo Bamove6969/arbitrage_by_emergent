@@ -1,13 +1,13 @@
 # Universal Arbitrage Container
-# Backend + Ollama + Ngrok + Colab Executor + Chromium, all-in-one
-# Pairs with the `ibga` service defined in docker-compose.yml
+# Backend + Ollama + Ngrok + Playwright (Colab automation) + Colab Executor, all-in-one.
+# Pairs with the `ibga` service defined in docker-compose.yml.
 # ===========================================
 
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# System dependencies (one layer)
+# System dependencies (Playwright runtime libs + ngrok + Ollama installer)
 RUN apt-get update && apt-get install -y \
         curl \
         git \
@@ -15,11 +15,22 @@ RUN apt-get update && apt-get install -y \
         ca-certificates \
         gnupg \
         unzip \
-        xvfb \
         netcat-openbsd \
         procps \
-        chromium \
-        chromium-driver \
+        # Playwright/Chromium shared libs (browser is fetched by `playwright install`)
+        libnss3 \
+        libatk-bridge2.0-0 \
+        libxkbcommon0 \
+        libxcomposite1 \
+        libxdamage1 \
+        libxfixes3 \
+        libxrandr2 \
+        libgbm1 \
+        libasound2 \
+        libpangocairo-1.0-0 \
+        libpango-1.0-0 \
+        libcairo2 \
+        fonts-liberation \
     && wget -q https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz \
     && tar -xzf ngrok-v3-stable-linux-amd64.tgz -C /usr/local/bin \
     && rm ngrok-v3-stable-linux-amd64.tgz \
@@ -39,9 +50,9 @@ RUN uv pip install --system -r requirements.txt \
         google-auth-oauthlib \
         websockets \
         flask \
-        selenium \
-        webdriver-manager \
-        nest_asyncio
+        playwright \
+        nest_asyncio \
+    && playwright install --with-deps chromium
 
 # Application
 COPY backend/ backend/
@@ -62,8 +73,7 @@ EXPOSE 8000 4040 5000 11434
 ENV PYTHONPATH=/app \
     LLM_PROVIDER=openrouter \
     IB_GATEWAY_URL=http://ibga:4001 \
-    OLLAMA_HOST=0.0.0.0:11434 \
-    DISPLAY=:99
+    OLLAMA_HOST=0.0.0.0:11434
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
     CMD curl -f http://localhost:8000/api/health || exit 1

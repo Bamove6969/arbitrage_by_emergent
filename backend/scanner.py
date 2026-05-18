@@ -506,25 +506,53 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
                 
                 if os.path.exists(notebook_path):
                     logger.info(f"Preparing Colab notebook: {notebook_path}")
-                    
-                    # Read notebook content
+
+                    # Parse the notebook as JSON so we can rewrite the WS_URL
+                    # placeholder safely (raw string replace would inject
+                    # unescaped quotes into the .ipynb JSON).
                     with open(notebook_path, 'r') as f:
-                        notebook_content = f.read()
-                    
-                    # Get ngrok URL and update WebSocket URL
+                        notebook_json = json.load(f)
+
                     try:
                         import httpx
-                        tunnels_resp = httpx.get("http://ngrok-tunnel:4040/api/tunnels", timeout=5.0)
-                        tunnels = tunnels_resp.json().get("tunnels", [])
+                        # ngrok runs in the same container now; fall back to the
+                        # legacy compose hostname for backwards compatibility.
+                        ngrok_api = None
+                        for host in ("http://localhost:4040", "http://ngrok-tunnel:4040"):
+                            try:
+                                resp = httpx.get(f"{host}/api/tunnels", timeout=5.0)
+                                if resp.status_code == 200:
+                                    ngrok_api = resp; break
+                            except Exception:
+                                continue
+                        tunnels = ngrok_api.json().get("tunnels", []) if ngrok_api else []
                         if tunnels:
                             ngrok_url = tunnels[0].get("public_url", "")
                             ws_url = ngrok_url.replace("https://", "wss://") + "/ws"
-                            import re
-                            pattern = r'WS_URL_PLACEHOLDER = \\"REPLACE_ME\\"'
-                            notebook_content = re.sub(pattern, f'WS_URL = "{ws_url}"', notebook_content)
-                            logger.info(f"Notebook WS_URL updated to: {ws_url}")
+                            replaced = 0
+                            for cell in notebook_json.get("cells", []):
+                                if cell.get("cell_type") != "code":
+                                    continue
+                                new_source = []
+                                for line in cell.get("source", []):
+                                    if "WS_URL_PLACEHOLDER" in line and "REPLACE_ME" in line:
+                                        new_source.append(
+                                            f'WS_URL_PLACEHOLDER = "{ws_url}"\n'
+                                        )
+                                        replaced += 1
+                                    else:
+                                        new_source.append(line)
+                                cell["source"] = new_source
+                            logger.info(
+                                f"Notebook WS_URL updated to: {ws_url} ({replaced} line(s) replaced)"
+                            )
+                        else:
+                            logger.warning("No ngrok tunnel found - notebook will fail to connect")
                     except Exception as e:
                         logger.warning(f"Could not update WS_URL: {e}")
+
+                    # Serialise back to string for Gist upload
+                    notebook_content = json.dumps(notebook_json, indent=1)
                     
                     # Upload to GitHub Gist
                     github_token = os.environ.get('GITHUB_TOKEN')

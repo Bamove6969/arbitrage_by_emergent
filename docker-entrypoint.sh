@@ -7,10 +7,7 @@ LOG_DIR=/app/logs
 mkdir -p "$LOG_DIR"
 
 echo "=== Universal Arbitrage Container ==="
-
-# Virtual display (Chromium / Selenium for Colab automation)
-Xvfb :99 -screen 0 1920x1080x24 >/dev/null 2>&1 &
-export DISPLAY=:99
+# Playwright runs Chromium fully headless -- no Xvfb needed.
 
 # 1. Ollama (local LLM)
 echo "[1/4] Starting Ollama (OLLAMA_HOST=${OLLAMA_HOST})..."
