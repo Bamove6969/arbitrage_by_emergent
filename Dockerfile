@@ -47,6 +47,9 @@ RUN uv pip install --system -r requirements.txt \
 COPY backend/ backend/
 COPY main.py .
 COPY colab_executor.py .
+# Primary notebook is v4-stable (bge-m3 + reranker, pure torch on T4).
+# v3 stays in the image as a fallback.
+COPY Cloud_GPU_Matcher_v4_Stable.ipynb .
 COPY Cloud_GPU_Matcher_v3_Auto.ipynb .
 COPY AGENTS.md .
 COPY start.sh .

@@ -57,6 +57,7 @@ services:
     volumes:
       - ./backend:/app/backend
       - ./reports:/app/reports
+      - ./Cloud_GPU_Matcher_v4_Stable.ipynb:/app/Cloud_GPU_Matcher_v4_Stable.ipynb
       - ./Cloud_GPU_Matcher_v3_Auto.ipynb:/app/Cloud_GPU_Matcher_v3_Auto.ipynb
       - ./data:/app/data
       - ./logs:/app/logs

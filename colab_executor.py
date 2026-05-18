@@ -53,7 +53,7 @@ def execute_colab_notebook(gist_id: str, owner: str = 'Bamove6969') -> dict:
     Opens Colab notebook in headless browser and triggers auto-execute.
     The notebook has auto-execute code in the first cell.
     """
-    colab_url = f'https://colab.research.google.com/gist/{owner}/{gist_id}/Cloud_GPU_Matcher_v3_Auto.ipynb'
+    colab_url = f'https://colab.research.google.com/gist/{owner}/{gist_id}/Cloud_GPU_Matcher_v4_Stable.ipynb'
     
     logger.info(f"Opening Colab: {colab_url}")
     driver = None

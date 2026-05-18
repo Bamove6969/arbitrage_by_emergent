@@ -41,7 +41,7 @@ class ArbitrageOrchestrator:
     
     def __init__(self, config: Dict[str, Any] = None):
         self.config = config or {}
-        self.notebook_path = self.config.get('notebook_path', '/app/Cloud_GPU_Matcher_v3_Auto.ipynb')
+        self.notebook_path = self.config.get('notebook_path', '/app/Cloud_GPU_Matcher_v4_Stable.ipynb')
         self.reports_dir = Path(self.config.get('reports_dir', '/app/reports'))
         self.reports_dir.mkdir(parents=True, exist_ok=True)
         
@@ -249,7 +249,7 @@ class ArbitrageOrchestrator:
 async def main():
     """Main entry point"""
     config = {
-        'notebook_path': '/app/Cloud_GPU_Matcher_v3_Auto.ipynb',
+        'notebook_path': '/app/Cloud_GPU_Matcher_v4_Stable.ipynb',
         'reports_dir': '/app/reports'
     }
     

@@ -502,7 +502,7 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
             try:
                 import os
                 import requests
-                notebook_path = '/app/Cloud_GPU_Matcher_v3_Auto.ipynb'
+                notebook_path = '/app/Cloud_GPU_Matcher_v4_Stable.ipynb'
                 
                 if os.path.exists(notebook_path):
                     logger.info(f"Preparing Colab notebook: {notebook_path}")
@@ -536,7 +536,7 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
                             'description': f'Arbitrage Scanner - {datetime.utcnow().isoformat()}',
                             'public': True,
                             'files': {
-                                'Cloud_GPU_Matcher_v3_Auto.ipynb': {
+                                'Cloud_GPU_Matcher_v4_Stable.ipynb': {
                                     'content': notebook_content
                                 }
                             }
@@ -575,12 +575,12 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
                                     scan_state["executor_status"] = "queued"
                                 else:
                                     logger.warning(f"Executor response: {exec_resp.status_code}")
-                                    colab_url = f'https://colab.research.google.com/gist/Bamove6969/{gist_id}/Cloud_GPU_Matcher_v3_Auto.ipynb'
+                                    colab_url = f'https://colab.research.google.com/gist/Bamove6969/{gist_id}/Cloud_GPU_Matcher_v4_Stable.ipynb'
                                     scan_state["message"] = f"Executor failed - manual: {colab_url}"
                                     scan_state["colab_url"] = colab_url
                             except Exception as e:
                                 logger.warning(f"Could not reach Oracle executor: {e}")
-                                colab_url = f'https://colab.research.google.com/gist/Bamove6969/{gist_id}/Cloud_GPU_Matcher_v3_Auto.ipynb'
+                                colab_url = f'https://colab.research.google.com/gist/Bamove6969/{gist_id}/Cloud_GPU_Matcher_v4_Stable.ipynb'
                                 scan_state["message"] = f"Executor offline - manual: {colab_url}"
                                 scan_state["colab_url"] = colab_url
                         else:
