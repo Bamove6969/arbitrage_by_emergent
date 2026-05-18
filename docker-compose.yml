@@ -1,91 +1,71 @@
+# Universal Arbitrage Stack
+#   docker compose up --build
+# brings up ONE container that runs IB Gateway, the FastAPI backend,
+# Ollama, ngrok, and the Playwright-driven Colab executor.
 services:
-  # IB Gateway
-  ibga:
-    image: heshiming/ibga
-    container_name: ibga-trading
+  universal:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: arbitrage-universal
     restart: always
     ipc: host
-    shm_size: 512mb
+    shm_size: 4gb
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    ports:
+      - "8000:8000"    # FastAPI backend
+      - "5000:5000"    # Colab executor + /colab-setup page
+      - "4040:4040"    # ngrok inspector
+      - "11434:11434"  # Ollama API
     environment:
+      # ----- IB Gateway -----
       - TERM=xterm
-      - IB_USERNAME=fiend6969
-      - IB_PASSWORD=fj4T-U4FnouobkzN-UL7
+      - IB_USERNAME=${IB_USERNAME:-fiend6969}
+      - IB_PASSWORD=${IB_PASSWORD}
       - IB_REGION=America
       - IB_TIMEZONE=America/Vancouver
       - IB_LOGINTAB=IB API
       - IB_LOGINTYPE=Live Trading
       - IB_PREFER_IBKEY=true
       - IBG_PORT_INTERNAL=4001
-    volumes:
-      - ./data:/home/ibg_settings
-    ports:
-      - "15800:5800"
-      - "40000:4000"
-      - "40010:4001"
-      - "40020:4002"
-
-    networks:
-      - arbitrage-net
-
-  # Arbitrage Backend with OpenRouter LLM
-  arbitrage-backend:
-    build: .
-    container_name: arbitrage-backend
-    restart: always
-    user: "1000:1000"
-    shm_size: 2gb
-    dns:
-      - 8.8.8.8
-      - 1.1.1.1
-    ports:
-      - "8001:8000"
-      - "5001:5000"
-    environment:
+      - IB_GATEWAY_URL=http://localhost:4001
+      - IBGA_WAIT_TIMEOUT=${IBGA_WAIT_TIMEOUT:-600}
+      # ----- Backend / LLM -----
       - PYTHONPATH=/app
-      - IB_GATEWAY_URL=http://ibga:4002
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - LLM_PROVIDER=openrouter
       - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - ORACLE_EXECUTOR_URL=http://localhost:5000
+      # ----- Ollama -----
+      - OLLAMA_URL=http://localhost:11434
+      - OLLAMA_HOST=0.0.0.0:11434
+      - OLLAMA_MODELS=${OLLAMA_MODELS:-llama3.1:8b}
+      - OLLAMA_NUM_PARALLEL=2
+      - OLLAMA_MAX_LOADED_MODELS=2
+      # ----- ngrok -----
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+      - NGROK_DOMAIN=${NGROK_DOMAIN:-copyrightable-pseudocartilaginous-sade.ngrok-free.dev}
+      # ----- Optional: Google / Colab service-account auth -----
+      - GOOGLE_REFRESH_TOKEN=${GOOGLE_REFRESH_TOKEN}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - COLAB_NOTEBOOK_DRIVE_ID=${COLAB_NOTEBOOK_DRIVE_ID}
+      - COLAB_AUTH_STATE=/app/data/colab_state.json
     volumes:
+      - ./data:/home/ibg_settings
       - ./backend:/app/backend
       - ./reports:/app/reports
+      - ./logs:/app/logs
+      - ./Cloud_GPU_Matcher_v4_Stable.ipynb:/app/Cloud_GPU_Matcher_v4_Stable.ipynb
       - ./Cloud_GPU_Matcher_v3_Auto.ipynb:/app/Cloud_GPU_Matcher_v3_Auto.ipynb
-      - ./.git:/app/.git
-      - ~/.gitconfig:/root/.gitconfig:ro
-    depends_on:
-      - ibga
-    networks:
-      - arbitrage-net
-    deploy:
-      resources:
-        limits:
-          memory: 4G
-        reservations:
-          memory: 2G
-
-  # Ngrok Tunnel for Colab Access
-  ngrok-tunnel:
-    image: ngrok/ngrok:latest
-    container_name: ngrok-tunnel
-    restart: always
-    environment:
-      - NGROK_AUTHTOKEN=${NGROK_AUTH_TOKEN}
-      - NGROK_SERVER_REGION=us
-    command:
-      - "http"
-      - "arbitrage-backend:8000"
-      - "--domain=copyrightable-pseudocartilaginous-sade.ngrok-free.dev"
-      - "--log=stdout"
-      - "--log-level=debug"
-    ports:
-      - "4040:4040"
-    depends_on:
-      - arbitrage-backend
-    networks:
-      - arbitrage-net
+      - ./data:/app/data
+      - ollama-models:/root/.ollama
 
 networks:
-  arbitrage-net:
+  default:
     driver: bridge
 
-volumes: {}
+volumes:
+  ollama-models:

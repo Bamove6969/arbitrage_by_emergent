@@ -56,34 +56,28 @@ class ColabWebSocketHandler:
             logger.error(f"Failed to send markets: {e}")
             raise
     
-    async def receive_results(self, websocket) -> Optional[Dict[str, Any]]:
-        """Receive matched pairs from Colab"""
+    async def receive_results(self, websocket, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Process an already-received cloud_results message and ack it."""
         try:
-            data = await websocket.receive_json()
-            
-            if data.get("type") == "cloud_results":
-                results = data.get("data", [])
-                logger.info(f"Received {len(results)} matched pairs from Colab")
-                
-                # Store results for processing
-                await self.results_queue.put({
-                    "pairs": results,
-                    "received_at": datetime.now(),
-                    "count": len(results)
-                })
-                
-                # Send acknowledgment
-                await websocket.send_json({
-                    "type": "results_received",
-                    "message": f"Received {len(results)} pairs",
-                    "timestamp": datetime.now().isoformat()
-                })
-                
-                return data
-            else:
+            if data.get("type") != "cloud_results":
                 logger.warning(f"Unexpected message type: {data.get('type')}")
                 return None
-                
+
+            results = data.get("data", [])
+            logger.info(f"Received {len(results)} matched pairs from Colab")
+
+            await self.results_queue.put({
+                "pairs": results,
+                "received_at": datetime.now(),
+                "count": len(results),
+            })
+
+            await websocket.send_json({
+                "type": "results_received",
+                "message": f"Received {len(results)} pairs",
+                "timestamp": datetime.now().isoformat(),
+            })
+            return data
         except Exception as e:
             logger.error(f"Failed to receive results: {e}")
             return None
@@ -160,8 +154,8 @@ async def handle_colab_websocket(websocket):
                     await colab_ws_handler.send_markets(websocket, markets)
                     
             elif msg_type == "cloud_results":
-                # Process results from Colab
-                await colab_ws_handler.receive_results(websocket)
+                # Process results from Colab (data is already in `data`)
+                await colab_ws_handler.receive_results(websocket, data)
                 
             elif msg_type == "ping":
                 await websocket.send_json({

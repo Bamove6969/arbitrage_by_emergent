@@ -41,7 +41,7 @@ class ArbitrageOrchestrator:
     
     def __init__(self, config: Dict[str, Any] = None):
         self.config = config or {}
-        self.notebook_path = self.config.get('notebook_path', '/app/Cloud_GPU_Matcher_v3_Auto.ipynb')
+        self.notebook_path = self.config.get('notebook_path', '/app/Cloud_GPU_Matcher_v4_Stable.ipynb')
         self.reports_dir = Path(self.config.get('reports_dir', '/app/reports'))
         self.reports_dir.mkdir(parents=True, exist_ok=True)
         
@@ -164,7 +164,7 @@ class ArbitrageOrchestrator:
             result = subprocess.run(
                 ['git', 'remote', 'get-url', 'origin'],
                 capture_output=True, text=True,
-                cwd='/home/droid/projects/arbitrage-calculator-main'
+                cwd='/app'
             )
             remote_url = result.stdout.strip()
             github_token = ''
@@ -179,20 +179,20 @@ class ArbitrageOrchestrator:
                 notebook_content = f.read()
 
             # Git add, commit, push
-            subprocess.run(['git', 'fetch', 'origin'], capture_output=True, cwd='/home/droid/projects/arbitrage-calculator-main')
-            subprocess.run(['git', 'checkout', 'origin/main', '--', notebook_name], capture_output=True, cwd='/home/droid/projects/arbitrage-calculator-main')
+            subprocess.run(['git', 'fetch', 'origin'], capture_output=True, cwd='/app')
+            subprocess.run(['git', 'checkout', 'origin/main', '--', notebook_name], capture_output=True, cwd='/app')
 
-            with open(f'/home/droid/projects/arbitrage-calculator-main/{notebook_name}', 'w') as f:
+            with open(f'/app/{notebook_name}', 'w') as f:
                 f.write(notebook_content)
 
-            subprocess.run(['git', 'add', notebook_name], capture_output=True, cwd='/home/droid/projects/arbitrage-calculator-main')
+            subprocess.run(['git', 'add', notebook_name], capture_output=True, cwd='/app')
             subprocess.run(
                 ['git', 'commit', '-m', f'Auto: Upload to Colab {datetime.now().isoformat()}'],
-                capture_output=True, cwd='/home/droid/projects/arbitrage-calculator-main'
+                capture_output=True, cwd='/app'
             )
             result = subprocess.run(
                 ['git', 'push', 'origin', 'main'],
-                capture_output=True, text=True, cwd='/home/droid/projects/arbitrage-calculator-main'
+                capture_output=True, text=True, cwd='/app'
             )
 
             if result.returncode != 0:
@@ -249,7 +249,7 @@ class ArbitrageOrchestrator:
 async def main():
     """Main entry point"""
     config = {
-        'notebook_path': '/app/Cloud_GPU_Matcher_v3_Auto.ipynb',
+        'notebook_path': '/app/Cloud_GPU_Matcher_v4_Stable.ipynb',
         'reports_dir': '/app/reports'
     }
     

@@ -108,8 +108,8 @@ async def websocket_endpoint(websocket: WebSocket):
 
             elif msg_type == "subscribe" and msg.get("channel") == "markets":
                 # Colab requests market data — send all current markets
-                from backend.scanner import get_all_markets
-                markets = get_all_markets()
+                from backend.scanner import get_cached_markets
+                markets = get_cached_markets()
                 await websocket.send_json({"type": "markets_data", "markets": markets, "count": len(markets)})
                 logger.info(f"Sent {len(markets)} markets to Colab via WebSocket")
 
@@ -196,6 +196,38 @@ async def reset_scan():
     scan_state["message"] = "Scan reset by user"
     scan_state["progress"] = 0
     return {"status": "reset", "message": "Scan state reset"}
+
+
+@app.get("/api/health")
+async def health():
+    """Container healthcheck endpoint."""
+    return {"status": "ok", "service": "arbitrage-backend"}
+
+
+@app.get("/api/llm-matches")
+async def llm_matches():
+    """Confirmed binary exact-matches after the two-gemma verification pass."""
+    from backend.scanner import get_llm_verified_matches
+    return {"matches": get_llm_verified_matches()}
+
+
+@app.get("/api/report/latest")
+async def latest_report():
+    """Serves the most recent arbitrage HTML report. Reachable through the ngrok tunnel."""
+    from fastapi.responses import HTMLResponse, JSONResponse
+    from backend.scanner import get_latest_report_path
+    from backend.html_report_generator import get_latest_report_path as fs_latest
+    path = get_latest_report_path() or fs_latest("/app/reports")
+    if not path:
+        return JSONResponse(
+            {"status": "no_report", "message": "No report generated yet. Trigger a scan first."},
+            status_code=404,
+        )
+    try:
+        with open(path, "r") as f:
+            return HTMLResponse(f.read())
+    except FileNotFoundError:
+        return JSONResponse({"status": "missing", "path": path}, status_code=404)
 
 
 @app.post("/api/scan")

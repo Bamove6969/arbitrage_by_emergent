@@ -1,55 +1,83 @@
-# Dockerfile for Arbitrage Scanner with OpenRouter LLM
+# Universal Arbitrage Container
+# Single image: IBKR Gateway + FastAPI backend + Ollama + ngrok + Playwright Colab executor.
+# Builds on heshiming/ibga so IB Gateway (Java + IBC + Xvfb) is already installed.
 # ===========================================
 
-FROM python:3.11-slim
+FROM heshiming/ibga
 
+USER root
 WORKDIR /app
 
-# Install system dependencies
+# Extra system tools (most of what we need is already in the base image)
 RUN apt-get update && apt-get install -y \
-    curl \
-    git \
-    wget \
-    ca-certificates \
+        python3-pip \
+        curl \
+        wget \
+        git \
+        ca-certificates \
+        netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv for fast package installation
+# uv for fast Python installs
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:$PATH"
 
-# Install tocolab CLI for auto-uploading notebooks to Colab
-RUN uv tool install tocolab
-
-# Copy requirements first for better caching
+# Python deps
 COPY requirements.txt .
-RUN uv pip install --system -r requirements.txt
+RUN uv pip install --system --break-system-packages -r requirements.txt \
+    && pip install --no-cache-dir --break-system-packages \
+        google-api-python-client \
+        google-auth-httplib2 \
+        google-auth-oauthlib \
+        websockets \
+        flask \
+        playwright \
+        nest_asyncio \
+    && playwright install --with-deps chromium
 
-# Install additional Python packages for Colab integration
-RUN pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib websockets
+# ngrok (auto-detect architecture)
+RUN ARCH="$(dpkg --print-architecture)"; \
+    case "$ARCH" in \
+        amd64)  NG="ngrok-v3-stable-linux-amd64.tgz" ;; \
+        arm64)  NG="ngrok-v3-stable-linux-arm64.tgz" ;; \
+        armhf)  NG="ngrok-v3-stable-linux-arm.tgz"   ;; \
+        *) echo "Unsupported arch: $ARCH" && exit 1 ;; \
+    esac \
+    && wget -q "https://bin.equinox.io/c/bNyj1mQVY4c/${NG}" \
+    && tar -xzf "${NG}" -C /usr/local/bin \
+    && rm "${NG}"
 
-# Copy the application
+# Ollama (installer auto-detects arch)
+RUN curl -fsSL https://ollama.com/install.sh | sh
+
+# Application
 COPY backend/ backend/
 COPY main.py .
-COPY client/ client/
-COPY start.sh .
-COPY AGENTS.md .
+COPY colab_executor.py .
+# v4-stable is the primary notebook (bge-m3 + reranker, pure torch on T4).
+# v3 stays in the image as a fallback.
+COPY Cloud_GPU_Matcher_v4_Stable.ipynb .
 COPY Cloud_GPU_Matcher_v3_Auto.ipynb .
+COPY AGENTS.md .
+COPY start.sh .
 
-# Expose ports (backend + dashboard)
-EXPOSE 8000 5000
+RUN mkdir -p /app/reports /app/data /app/logs /root/.ollama
 
-# Environment variables
-ENV PYTHONPATH=/app
-ENV IB_GATEWAY_URL=http://ibga:4000
-ENV LLM_PROVIDER=openrouter
+# Ports: backend, ngrok inspector, colab executor / setup page, Ollama
+EXPOSE 8000 4040 5000 11434
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+ENV PYTHONPATH=/app \
+    LLM_PROVIDER=openrouter \
+    IB_GATEWAY_URL=http://localhost:4001 \
+    OLLAMA_URL=http://localhost:11434 \
+    OLLAMA_HOST=0.0.0.0:11434 \
+    OLLAMA_NUM_PARALLEL=2 \
+    OLLAMA_MAX_LOADED_MODELS=2
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=5 \
     CMD curl -f http://localhost:8000/api/health || exit 1
 
-# Startup script
 COPY docker-entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Default command
-CMD ["python", "-m", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["/entrypoint.sh"]

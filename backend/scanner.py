@@ -146,7 +146,7 @@ def set_cloud_results(results: List[Dict[str, Any]], clear: bool = True):
     logger.info(f"Saved {len(top_k)} results to {results_file}")
     
     _all_opportunities.extend(top_k)
-    
+
     scan_state["progress"] = 100
     scan_state["phase"] = "Cloud match complete"
     scan_state["status"] = "complete"
@@ -155,8 +155,79 @@ def set_cloud_results(results: List[Dict[str, Any]], clear: bool = True):
 
     scan_state["is_scanning"] = False
     _broadcast_state()  # Final broadcast
-    
+
     logger.info(f"Cloud results synced! Top {TOP_K} prioritized. Total ops: {len(_all_opportunities)}")
+
+    # Kick off LLM verification + report generation in the background so the
+    # caller (the /ws cloud_results handler) can ack Colab without blocking.
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop.create_task(_verify_and_report(top_k))
+        else:
+            logger.warning("No running event loop -- skipping LLM verification kickoff")
+    except RuntimeError:
+        logger.warning("No event loop in this thread -- skipping LLM verification kickoff")
+
+
+async def _verify_and_report(matches: List[Dict[str, Any]]):
+    """
+    Post-Colab pipeline: 2 gemma workers verify the 2000 matches in parallel,
+    then a comprehensive HTML report is written to /app/reports/.
+    """
+    global _llm_verified_matches, _latest_report_path
+    try:
+        from backend.llm_parallel_workers import run_parallel_llm_verification
+        from backend.html_report_generator import generate_html_report
+        from datetime import datetime
+        from pathlib import Path
+
+        scan_state["phase"] = "LLM verification"
+        scan_state["message"] = f"Two Gemma workers analysing {len(matches)} matches..."
+        _broadcast_state()
+
+        verified = await run_parallel_llm_verification(matches)
+        confirmed = [v for v in verified if v.get("isMatch")]
+
+        scan_state["phase"] = "Generating report"
+        scan_state["message"] = f"Confirmed {len(confirmed)} exact matches -- writing report..."
+        _broadcast_state()
+
+        reports_dir = Path("/app/reports")
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        out_path = reports_dir / f"arbitrage_report_{ts}.html"
+        generate_html_report(confirmed, str(out_path))
+
+        _llm_verified_matches = confirmed
+        _latest_report_path = str(out_path)
+
+        scan_state["phase"] = "Report ready"
+        scan_state["message"] = f"{len(confirmed)} confirmed matches. Report: {out_path.name}"
+        scan_state["confirmed_matches"] = len(confirmed)
+        scan_state["latest_report"] = out_path.name
+        _broadcast_state()
+
+        logger.info(f"Pipeline complete: {len(confirmed)} confirmed matches -> {out_path}")
+    except Exception as e:
+        logger.error(f"LLM verification / report generation failed: {e}", exc_info=True)
+        scan_state["phase"] = "Report failed"
+        scan_state["message"] = f"LLM pipeline error: {e}"
+        _broadcast_state()
+
+
+# Stateful holders for the verified matches and the most recent report path,
+# exposed via /api/llm-matches and /api/report/latest in main.py.
+_llm_verified_matches: List[Dict[str, Any]] = []
+_latest_report_path: Optional[str] = None
+
+
+def get_llm_verified_matches() -> List[Dict[str, Any]]:
+    return _llm_verified_matches
+
+
+def get_latest_report_path() -> Optional[str]:
+    return _latest_report_path
 
 
 async def refresh_top_leads(limit: int = 20):
@@ -502,29 +573,55 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
             try:
                 import os
                 import requests
-                notebook_path = '/app/Cloud_GPU_Matcher_v3_Auto.ipynb'
+                notebook_path = '/app/Cloud_GPU_Matcher_v4_Stable.ipynb'
                 
                 if os.path.exists(notebook_path):
                     logger.info(f"Preparing Colab notebook: {notebook_path}")
-                    
-                    # Read notebook content
+
+                    # Parse the notebook as JSON so we can rewrite the WS_URL
+                    # placeholder safely (raw string replace would inject
+                    # unescaped quotes into the .ipynb JSON).
                     with open(notebook_path, 'r') as f:
-                        notebook_content = f.read()
-                    
-                    # Get ngrok URL and update WebSocket URL
+                        notebook_json = json.load(f)
+
                     try:
                         import httpx
-                        tunnels_resp = httpx.get("http://ngrok-tunnel:4040/api/tunnels", timeout=5.0)
-                        tunnels = tunnels_resp.json().get("tunnels", [])
+                        # ngrok runs in the same container now -- always localhost.
+                        ngrok_api = None
+                        try:
+                            resp = httpx.get("http://localhost:4040/api/tunnels", timeout=5.0)
+                            if resp.status_code == 200:
+                                ngrok_api = resp
+                        except Exception:
+                            pass
+                        tunnels = ngrok_api.json().get("tunnels", []) if ngrok_api else []
                         if tunnels:
                             ngrok_url = tunnels[0].get("public_url", "")
                             ws_url = ngrok_url.replace("https://", "wss://") + "/ws"
-                            import re
-                            pattern = r'WS_URL_PLACEHOLDER = \\"REPLACE_ME\\"'
-                            notebook_content = re.sub(pattern, f'WS_URL = "{ws_url}"', notebook_content)
-                            logger.info(f"Notebook WS_URL updated to: {ws_url}")
+                            replaced = 0
+                            for cell in notebook_json.get("cells", []):
+                                if cell.get("cell_type") != "code":
+                                    continue
+                                new_source = []
+                                for line in cell.get("source", []):
+                                    if "WS_URL_PLACEHOLDER" in line and "REPLACE_ME" in line:
+                                        new_source.append(
+                                            f'WS_URL_PLACEHOLDER = "{ws_url}"\n'
+                                        )
+                                        replaced += 1
+                                    else:
+                                        new_source.append(line)
+                                cell["source"] = new_source
+                            logger.info(
+                                f"Notebook WS_URL updated to: {ws_url} ({replaced} line(s) replaced)"
+                            )
+                        else:
+                            logger.warning("No ngrok tunnel found - notebook will fail to connect")
                     except Exception as e:
                         logger.warning(f"Could not update WS_URL: {e}")
+
+                    # Serialise back to string for Gist upload
+                    notebook_content = json.dumps(notebook_json, indent=1)
                     
                     # Upload to GitHub Gist
                     github_token = os.environ.get('GITHUB_TOKEN')
@@ -536,7 +633,7 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
                             'description': f'Arbitrage Scanner - {datetime.utcnow().isoformat()}',
                             'public': True,
                             'files': {
-                                'Cloud_GPU_Matcher_v3_Auto.ipynb': {
+                                'Cloud_GPU_Matcher_v4_Stable.ipynb': {
                                     'content': notebook_content
                                 }
                             }
@@ -575,12 +672,12 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
                                     scan_state["executor_status"] = "queued"
                                 else:
                                     logger.warning(f"Executor response: {exec_resp.status_code}")
-                                    colab_url = f'https://colab.research.google.com/gist/Bamove6969/{gist_id}/Cloud_GPU_Matcher_v3_Auto.ipynb'
+                                    colab_url = f'https://colab.research.google.com/gist/Bamove6969/{gist_id}/Cloud_GPU_Matcher_v4_Stable.ipynb'
                                     scan_state["message"] = f"Executor failed - manual: {colab_url}"
                                     scan_state["colab_url"] = colab_url
                             except Exception as e:
                                 logger.warning(f"Could not reach Oracle executor: {e}")
-                                colab_url = f'https://colab.research.google.com/gist/Bamove6969/{gist_id}/Cloud_GPU_Matcher_v3_Auto.ipynb'
+                                colab_url = f'https://colab.research.google.com/gist/Bamove6969/{gist_id}/Cloud_GPU_Matcher_v4_Stable.ipynb'
                                 scan_state["message"] = f"Executor offline - manual: {colab_url}"
                                 scan_state["colab_url"] = colab_url
                         else:

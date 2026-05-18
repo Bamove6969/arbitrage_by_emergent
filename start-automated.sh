@@ -67,7 +67,7 @@ if command -v ngrok &> /dev/null; then
     echo "   Public URL: https://copyrightable-pseudocartilaginous-sade.ngrok-free.dev"
 else
     echo "ℹ️  ngrok not installed - using docker ngrok service"
-    echo "   Check status: docker logs ngrok-tunnel"
+    echo "   Check status: docker logs arbitrage-universal"
 fi
 
 # Step 5: Display status
@@ -85,9 +85,9 @@ echo "📁 Reports:   $REPORTS_DIR"
 echo ""
 echo "📝 Useful Commands:"
 echo "   - View logs:         docker-compose logs -f"
-echo "   - Backend logs:      docker logs -f arbitrage-backend"
-echo "   - Ollama logs:       docker logs -f arbitrage-backend | grep ollama"
-echo "   - ngrok logs:        docker logs -f ngrok-tunnel"
+echo "   - Backend logs:      docker logs -f arbitrage-universal"
+echo "   - Ollama logs:       docker exec arbitrage-universal tail -f /app/logs/ollama.log"
+echo "   - ngrok logs:        docker exec arbitrage-universal tail -f /app/logs/ngrok.log"
 echo "   - Stop all:          docker-compose down"
 echo ""
 echo "🚀 To trigger the automated pipeline:"
