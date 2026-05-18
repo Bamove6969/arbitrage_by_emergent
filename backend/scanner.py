@@ -586,16 +586,14 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
 
                     try:
                         import httpx
-                        # ngrok runs in the same container now; fall back to the
-                        # legacy compose hostname for backwards compatibility.
+                        # ngrok runs in the same container now -- always localhost.
                         ngrok_api = None
-                        for host in ("http://localhost:4040", "http://ngrok-tunnel:4040"):
-                            try:
-                                resp = httpx.get(f"{host}/api/tunnels", timeout=5.0)
-                                if resp.status_code == 200:
-                                    ngrok_api = resp; break
-                            except Exception:
-                                continue
+                        try:
+                            resp = httpx.get("http://localhost:4040/api/tunnels", timeout=5.0)
+                            if resp.status_code == 200:
+                                ngrok_api = resp
+                        except Exception:
+                            pass
                         tunnels = ngrok_api.json().get("tunnels", []) if ngrok_api else []
                         if tunnels:
                             ngrok_url = tunnels[0].get("public_url", "")

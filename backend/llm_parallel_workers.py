@@ -147,7 +147,7 @@ Your response:"""
                 "explanation": f"REJECTED: {binary_check['reason']}",
                 "model": self.model_name,
                 "worker": self.worker_id,
-                "originalROI": pair["roi"],
+                "roi": pair["roi"],
                 "matchScore": pair.get("matchScore", 0),
                 "rejected_reason": binary_check['reason']
             }
@@ -167,8 +167,8 @@ Your response:"""
             "explanation": explanation,
             "model": self.model_name,
             "worker": self.worker_id,
-            "originalROI": pair["roi"],
-            "matchScore": pair.get("matchScore", 0)
+            "roi": pair["roi"],
+            "matchScore": pair.get("matchScore", 0),
         }
     
     def _verify_binary_pair(self, market_a: Dict, market_b: Dict) -> Dict[str, Any]:

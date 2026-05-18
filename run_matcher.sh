@@ -1,7 +1,7 @@
 #!/bin/bash
 # Run GPU matching locally via papermill - no Colab auth needed
 
-cd /home/droid/projects/arbitrage-calculator-main
+cd "$(dirname "$0")"
 
 # Save current markets to JSON
 curl -s http://localhost:8001/api/raw-markets > /tmp/markets.json
