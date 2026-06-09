@@ -1,350 +1,202 @@
 """
-Parallel LLM Worker System - Processes matches with Gemma4 and Qwen3.5
-Splits 2000 matches into 2 batches of 1000, runs 2 workers per model (4 total)
-Uses natural language to identify identically-worded questions across platforms
+Parallel LLM Verification — 2 instances × 2 workers = 4 concurrent slots.
+
+Each pair goes through two checks:
+  1. Hard binary filter  — market data must show outcomeCount == 2 for BOTH sides.
+     Anything with 1 or 3+ outcomes is disqualified immediately, no LLM call needed.
+  2. Semantic equivalence — Gemma via OpenRouter reads the two questions and decides
+     whether they are asking about EXACTLY the same real-world event/outcome.
+     Questions that look identical but have different resolution conditions are rejected.
+     Questions that look different but mean the same thing are approved.
+
+The 2000-pair limit is intentional for now. If LLM verification finds very few matches
+that limit can be raised in the Kaggle notebook (top_k param) without any code change here.
 """
+
 import asyncio
 import logging
 import os
 import re
 from typing import List, Dict, Any, Tuple
-from concurrent.futures import ThreadPoolExecutor
-import httpx
 
-MATCH_YES_RE = re.compile(r"^MATCH:\s*YES", re.MULTILINE | re.IGNORECASE)
-EXPLANATION_RE = re.compile(r"^Explanation:\s*(.+?)(?:\n\s*\n|\Z)", re.MULTILINE | re.IGNORECASE | re.DOTALL)
+import httpx
 
 logger = logging.getLogger(__name__)
 
-OLLAMA_BASE_URL = "http://localhost:11434"
+# ── Config ─────────────────────────────────────────────────────────────────────
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+OPENROUTER_URL     = "https://openrouter.ai/api/v1/chat/completions"
+# Gemma 3 27B instruction-tuned on OpenRouter — matches the Gemma 4 27B used on Kaggle
+# Override with OLLAMA_MODEL env var if a different model is preferred
+_DEFAULT_MODEL = "google/gemma-3-27b-it"
+LLM_MODEL      = os.environ.get("OLLAMA_MODEL", _DEFAULT_MODEL)
 
-class LLMWorker:
+# 4 total concurrent LLM slots (2 instances × 2 workers each)
+_SEMAPHORE: asyncio.Semaphore | None = None
+
+
+def _sem() -> asyncio.Semaphore:
+    global _SEMAPHORE
+    if _SEMAPHORE is None:
+        _SEMAPHORE = asyncio.Semaphore(4)
+    return _SEMAPHORE
+
+
+# ── Binary pre-filter (no LLM, pure metadata) ──────────────────────────────────
+
+def _is_binary(market: Dict) -> Tuple[bool, str]:
     """
-    Individual LLM worker that processes a batch of matches
+    True only if the market has EXACTLY 2 outcomes.
+    1 outcome or 3+ outcomes are both disqualified immediately.
+    Examples of valid binary: Yes/No, Trump/Harris, Over/Under.
+    Examples of invalid: which of 5 candidates wins, exact vote percentage.
     """
-    
-    def __init__(self, worker_id: str, model_name: str, batch_size: int = 1000):
-        self.worker_id = worker_id
-        self.model_name = model_name
-        self.batch_size = batch_size
-        self.ollama_url = f"{OLLAMA_BASE_URL}/api/generate"
-        self.processed_count = 0
-        self.matches_found = 0
-        
-    async def generate_prompt(self, market_a: Dict, market_b: Dict) -> str:
-        """
-        Generate natural language prompt for question comparison
-        Focuses on semantic meaning, catches subtle differences, rejects multi-outcome questions
-        """
-        prompt = f"""You are an expert at analyzing prediction market questions to determine if they are asking EXACTLY the same thing, even when worded completely differently.
+    count = market.get("outcomeCount", 2)
+    if count == 1:
+        return False, "only 1 outcome"
+    if count > 2:
+        return False, f"{count} outcomes (only 2-outcome markets are usable)"
+    if not market.get("isBinary", True):
+        return False, "isBinary=False in market metadata"
+    return True, ""
 
-## Market A ({market_a['platform']}):
-**Question:** "{market_a['title']}"
-**Yes Price:** {market_a['yesPrice']}
-**URL:** {market_a.get('url', 'N/A')}
 
-## Market B ({market_b['platform']}):
-**Question:** "{market_b['title']}"
-**Yes Price:** {market_b['yesPrice']}
-**URL:** {market_b.get('url', 'N/A')}
+def binary_filter(pair: Dict) -> Tuple[bool, str]:
+    """Both sides must independently pass the binary check."""
+    ok_a, reason_a = _is_binary(pair["marketA"])
+    if not ok_a:
+        return False, f"Market A: {reason_a}"
+    ok_b, reason_b = _is_binary(pair["marketB"])
+    if not ok_b:
+        return False, f"Market B: {reason_b}"
+    return True, ""
 
-## Analysis Steps (think through these carefully):
 
-1. **Core Event/Outcome**: What specific event or outcome is each question asking about? Are they identical?
+# ── LLM prompt ────────────────────────────────────────────────────────────────
 
-2. **Resolution Conditions**: What exact conditions must be met for "Yes" to resolve in each market? Are they the same?
+def _build_prompt(market_a: Dict, market_b: Dict) -> str:
+    return f"""You are verifying whether two binary prediction-market questions are semantically identical — asking about EXACTLY the same real-world event, with the same resolution conditions, same deadline, and the same two possible outcomes.
 
-3. **Timeline/Deadline**: Do both questions have the exact same timeframe or deadline?
+Platform A ({market_a['platform']}): "{market_a['title']}"
+Platform B ({market_b['platform']}): "{market_b['title']}"
 
-4. **Threshold Values**: If numbers are involved (percentages, counts, scores), are the thresholds identical?
+Work through these checks:
 
-5. **Subtle Wording Differences**: Look for words like "exactly", "at least", "more than", "less than", "by", "before", "after" - do they change the meaning?
+1. CORE EVENT — Are both questions about the exact same real-world event or outcome?
+2. RESOLUTION — Would both markets resolve YES under precisely the same conditions? Any difference in threshold, scope, or wording that could cause one to resolve YES while the other resolves NO disqualifies the pair.
+3. TIMELINE — Do both share the same deadline or time window? Different dates = different questions.
+4. SCOPE — Check for subtle modifiers: "at least" vs "more than", "by end of year" vs "before December", named person vs their role.
+5. EDGE CASES — Is there any realistic scenario where one resolves YES and the other resolves NO simultaneously?
 
-6. **Binary Check**: Are BOTH questions truly binary (only 2 possible outcomes: Yes/No)? If either question allows 3+ outcomes, they CANNOT match.
+Reply in EXACTLY this format — nothing else before or after:
 
-7. **Edge Cases**: Consider borderline scenarios - would there be any situation where one market resolves differently than the other?
-
-## Decision Rules:
-
-**MATCH: YES** - ONLY if:
-- Both questions ask about the EXACT same event/outcome
-- Resolution conditions are identical (no subtle differences)
-- Timelines/deadlines match exactly
-- BOTH are strictly binary (Yes/No only)
-- Any reasonable person would agree they're asking the same thing
-
-**MATCH: NO** - if ANY of these are true:
-- Different events or outcomes
-- Different resolution conditions (even slightly)
-- Different timelines or deadlines
-- Different numerical thresholds
-- Either question has 3+ possible outcomes
-- One is about "exactly X" and the other is "at least X"
-- Any ambiguity or potential for different resolution
-
-## Your Response Format:
-
-If EXACTLY the same (semantically identical):
-```
 MATCH: YES
-Explanation: [1-2 sentences explaining why they're identical despite wording differences]
-```
+Explanation: <one sentence explaining why they are identical despite different wording>
 
-If there are ANY differences:
-```
+or
+
 MATCH: NO
-Explanation: [Clearly state the specific difference - e.g., "Market A asks about 'at least 50%' while Market B asks about 'more than 50%'", or "Market A has deadline of March 2025, Market B is December 2025"]
-```
+Explanation: <one sentence naming the specific difference that disqualifies the pair>"""
 
-Your response:"""
-        return prompt
-    
-    async def query_ollama(self, prompt: str) -> Tuple[bool, str]:
-        """Query Ollama API for match verification"""
+
+# ── Single pair verification ───────────────────────────────────────────────────
+
+async def _verify_pair(pair: Dict, worker_id: int) -> Dict:
+    market_a = pair["marketA"]
+    market_b = pair["marketB"]
+
+    # Step 1 — hard binary filter: instant disqualification, no API call
+    ok, reason = binary_filter(pair)
+    if not ok:
+        return {**pair, "isMatch": False,
+                "explanation": f"DISQUALIFIED (non-binary): {reason}",
+                "worker": worker_id}
+
+    # Step 2 — LLM semantic equivalence check
+    prompt = _build_prompt(market_a, market_b)
+
+    async with _sem():
         try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                response = await client.post(
-                    self.ollama_url,
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(
+                    OPENROUTER_URL,
+                    headers={
+                        "Authorization":  f"Bearer {OPENROUTER_API_KEY}",
+                        "HTTP-Referer":   "https://github.com/Bamove6969/arbitrage-calculator-main",
+                        "X-Title":        "Arbitrage Scanner",
+                    },
                     json={
-                        "model": self.model_name,
-                        "prompt": prompt,
-                        "stream": False,
-                        "options": {
-                            "temperature": 0.1,
-                            "num_predict": 256
-                        }
-                    }
+                        "model":       LLM_MODEL,
+                        "messages":    [{"role": "user", "content": prompt}],
+                        "temperature": 0.1,
+                        "max_tokens":  150,
+                    },
                 )
-                response.raise_for_status()
-                result = response.json()
-                output = result.get("response", "")
-                
-                is_match = bool(MATCH_YES_RE.search(output))
-                explanation_match = EXPLANATION_RE.search(output)
-                if explanation_match:
-                    explanation = explanation_match.group(1).strip().strip("`").strip()
-                else:
-                    explanation = output.strip().strip("`").strip()
-                return is_match, explanation
-                
-        except Exception as e:
-            logger.error(f"{self.worker_id} - Ollama query failed: {e}")
-            return False, f"Error: {str(e)}"
-    
-    async def process_pair(self, pair: Dict[str, Any]) -> Dict[str, Any]:
-        """Process a single market pair with strict binary filtering"""
-        market_a = pair["marketA"]
-        market_b = pair["marketB"]
-        
-        # Pre-filter: Check both markets are strictly binary
-        binary_check = self._verify_binary_pair(market_a, market_b)
-        if not binary_check['is_valid']:
-            self.processed_count += 1
-            return {
-                "marketA": market_a,
-                "marketB": market_b,
-                "isMatch": False,
-                "explanation": f"REJECTED: {binary_check['reason']}",
-                "model": self.model_name,
-                "worker": self.worker_id,
-                "roi": pair["roi"],
-                "matchScore": pair.get("matchScore", 0),
-                "rejected_reason": binary_check['reason']
-            }
-        
-        # Proceed with LLM analysis
-        prompt = await self.generate_prompt(market_a, market_b)
-        is_match, explanation = await self.query_ollama(prompt)
-        
-        self.processed_count += 1
-        if is_match:
-            self.matches_found += 1
-        
-        return {
-            "marketA": market_a,
-            "marketB": market_b,
-            "isMatch": is_match,
-            "explanation": explanation,
-            "model": self.model_name,
-            "worker": self.worker_id,
-            "roi": pair["roi"],
-            "matchScore": pair.get("matchScore", 0),
-        }
-    
-    def _verify_binary_pair(self, market_a: Dict, market_b: Dict) -> Dict[str, Any]:
-        """
-        Verify both markets are strictly binary (2 outcomes only)
-        Returns validation result and reason if rejected
-        """
-        # Check outcome count
-        if market_a.get('outcomeCount', 2) != 2:
-            return {
-                'is_valid': False,
-                'reason': f"Market A has {market_a.get('outcomeCount', 'unknown')} outcomes (must be exactly 2)"
-            }
-        
-        if market_b.get('outcomeCount', 2) != 2:
-            return {
-                'is_valid': False,
-                'reason': f"Market B has {market_b.get('outcomeCount', 'unknown')} outcomes (must be exactly 2)"
-            }
-        
-        # Check for multi-outcome keywords in titles
-        multi_outcome_keywords = [
-            'how many', 'how much', 'what number', 'what percentage',
-            'which candidate', 'who will', 'margin of', 'by how much',
-            'range of', 'between', 'spread', 'total number',
-            'exactly', 'precisely', 'number of', 'count of'
-        ]
-        
-        for market in [market_a, market_b]:
-            title = market.get('title', '').lower()
-            for keyword in multi_outcome_keywords:
-                if keyword in title:
-                    # Allow binary over/under
-                    if 'over' in title and 'or' in title and 'under' in title:
-                        continue
-                    return {
-                        'is_valid': False,
-                        'reason': f"Non-binary question structure detected: '{keyword}' in title"
-                    }
-        
-        # Check for binary question indicators
-        binary_indicators = ['will ', 'does ', 'is ', 'are ', 'was ', 'were ', 'whether', 'if ']
-        
-        for name, market in [('Market A', market_a), ('Market B', market_b)]:
-            title = market.get('title', '').lower()
-            has_binary = any(ind in title for ind in binary_indicators)
-            if not has_binary:
-                return {
-                    'is_valid': False,
-                    'reason': f"{name} doesn't have binary question structure"
-                }
-        
-        return {'is_valid': True, 'reason': None}
-    
-    async def process_batch(self, pairs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Process a batch of pairs"""
-        logger.info(f"{self.worker_id} - Processing batch of {len(pairs)} pairs with {self.model_name}")
-        
-        tasks = [self.process_pair(pair) for pair in pairs]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Filter out exceptions and log them
-        valid_results = []
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                logger.error(f"{self.worker_id} - Pair {i} failed: {result}")
-            else:
-                valid_results.append(result)
-        
-        logger.info(f"{self.worker_id} - Completed: {len(valid_results)} pairs, {self.matches_found} matches found")
-        return valid_results
+                resp.raise_for_status()
+                content = resp.json()["choices"][0]["message"]["content"].strip()
+        except Exception as exc:
+            logger.warning(f"[worker {worker_id}] LLM call failed: {exc}")
+            return {**pair, "isMatch": False,
+                    "explanation": f"LLM error: {exc}", "worker": worker_id}
+
+    is_match = bool(re.match(r"MATCH:\s*YES", content, re.IGNORECASE))
+    expl_m   = re.search(r"Explanation:\s*(.+)", content, re.IGNORECASE | re.DOTALL)
+    explanation = expl_m.group(1).strip() if expl_m else content[:200]
+
+    return {**pair, "isMatch": is_match, "explanation": explanation, "worker": worker_id}
 
 
-class ParallelLLMProcessor:
+# ── Parallel batch processing ──────────────────────────────────────────────────
+
+async def _process_half(pairs: List[Dict], instance_id: int) -> List[Dict]:
+    """One 'instance' processes its 1000 pairs with 2 concurrent workers."""
+    tasks = [
+        _verify_pair(p, worker_id=instance_id * 2 + (i % 2))
+        for i, p in enumerate(pairs)
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    out = []
+    for r in results:
+        if isinstance(r, Exception):
+            logger.error(f"[instance {instance_id}] pair failed: {r}")
+        else:
+            out.append(r)
+    return out
+
+
+async def run_parallel_llm_verification(pairs: List[Dict]) -> List[Dict]:
     """
-    Orchestrates 4 parallel workers (2 per model) processing 2000 matches
+    Main entry point.
+
+    Splits pairs into two halves (1000 each by default for a 2000-pair input),
+    runs both halves in parallel (2 instances × 2 workers = 4 concurrent LLM slots),
+    and returns ALL results — caller filters on result['isMatch'].
+
+    To raise the ceiling beyond 2000, increase top_k in the Kaggle notebook.
     """
-    
-    def __init__(self):
-        self.workers = []
-        self.results = []
-        
-    def setup_workers(self):
-        model_name = os.environ.get("OLLAMA_MODEL", "gemma4:31b-cloud")
-        self.workers = [
-            LLMWorker("gemma-worker-1", model_name),
-            LLMWorker("gemma-worker-2", model_name),
-        ]
-        logger.info(f"Initialized {len(self.workers)} workers with model {model_name}")
+    if not OPENROUTER_API_KEY:
+        logger.error("OPENROUTER_API_KEY not set — LLM verification skipped")
+        return pairs
 
-    def split_batches(self, pairs: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
-        mid = len(pairs) // 2
-        batches = [pairs[:mid], pairs[mid:]]
-        logger.info(f"Split {len(pairs)} pairs into 2 batches: {[len(b) for b in batches]}")
-        return batches
-    
-    async def process_all(self, pairs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Process all pairs in parallel across 4 workers
-        """
-        if not self.workers:
-            self.setup_workers()
-        
-        batches = self.split_batches(pairs)
-        
-        # Assign batches to workers
-        tasks = []
-        for i, worker in enumerate(self.workers):
-            if i < len(batches):
-                task = worker.process_batch(batches[i])
-                tasks.append(task)
-        
-        logger.info("Starting parallel processing...")
-        start_time = asyncio.get_event_loop().time()
-        
-        # Run all workers in parallel
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        elapsed = asyncio.get_event_loop().time() - start_time
-        logger.info(f"Parallel processing completed in {elapsed:.2f}s")
-        
-        # Combine results
-        all_results = []
-        for result in results:
-            if isinstance(result, Exception):
-                logger.error(f"Worker failed: {result}")
-            else:
-                all_results.extend(result)
-        
-        # Filter to only exact matches
-        exact_matches = [r for r in all_results if r.get("isMatch", False)]
-        
-        logger.info(f"Total processed: {len(all_results)}, Exact matches: {len(exact_matches)}")
-        
-        self.results = exact_matches
-        return exact_matches
-    
-    def get_stats(self) -> Dict[str, Any]:
-        """Get processing statistics"""
-        return {
-            "total_workers": len(self.workers),
-            "workers": [
-                {
-                    "id": w.worker_id,
-                    "model": w.model_name,
-                    "processed": w.processed_count,
-                    "matches_found": w.matches_found
-                }
-                for w in self.workers
-            ],
-            "total_results": len(self.results)
-        }
+    logger.info(
+        f"LLM verification starting: {len(pairs)} pairs | "
+        f"model={LLM_MODEL} | 2 instances × 2 workers = 4 concurrent slots"
+    )
 
+    mid = len(pairs) // 2
+    half_a, half_b = pairs[:mid], pairs[mid:]
 
-async def run_parallel_llm_verification(pairs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Main entry point - Process pairs with parallel LLM workers
-    """
-    processor = ParallelLLMProcessor()
-    return await processor.process_all(pairs)
+    results_a, results_b = await asyncio.gather(
+        _process_half(half_a, instance_id=0),
+        _process_half(half_b, instance_id=1),
+    )
 
+    all_results  = results_a + results_b
+    verified     = [r for r in all_results if r.get("isMatch")]
+    disqualified = len(all_results) - len(verified)
 
-if __name__ == "__main__":
-    # Test with sample data
-    import json
-    
-    async def test():
-        # Load sample pairs
-        with open("/tmp/test_pairs.json", "r") as f:
-            pairs = json.load(f)
-        
-        processor = ParallelLLMProcessor()
-        results = await processor.process_all(pairs[:2000])
-        
-        print(f"\nResults: {len(results)} exact matches found")
-        print(f"Stats: {processor.get_stats()}")
-    
-    # asyncio.run(test())
-    pass
+    logger.info(
+        f"LLM verification done: {len(all_results)} processed → "
+        f"{len(verified)} verified matches, {disqualified} disqualified"
+    )
+    return all_results
