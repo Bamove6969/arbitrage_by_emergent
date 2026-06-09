@@ -41,7 +41,7 @@ services:
       # ----- Ollama -----
       - OLLAMA_URL=http://localhost:11434
       - OLLAMA_HOST=0.0.0.0:11434
-      - OLLAMA_MODELS=${OLLAMA_MODELS:-llama3.1:8b}
+      - OLLAMA_MODELS=${OLLAMA_MODELS:-}
       - OLLAMA_NUM_PARALLEL=2
       - OLLAMA_MAX_LOADED_MODELS=2
       # ----- ngrok -----
@@ -51,6 +51,7 @@ services:
       - KAGGLE_USERNAME=${KAGGLE_USERNAME:-bamove6969}
       - KAGGLE_API_TOKEN=${KAGGLE_API_TOKEN}
       - KAGGLE_KERNEL_SLUG=${KAGGLE_KERNEL_SLUG:-cloud-gpu-matcher-v4}
+      - HF_TOKEN=${HF_TOKEN}
     volumes:
       - ./data:/home/ibg_settings
       - ./backend:/app/backend

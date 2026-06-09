@@ -19,6 +19,7 @@ NOTEBOOK_PATH   = Path(os.environ.get("NOTEBOOK_PATH", "/app/Cloud_GPU_Matcher_v
 KAGGLE_USERNAME = os.environ.get("KAGGLE_USERNAME", "bamove6969")
 KAGGLE_KEY      = os.environ.get("KAGGLE_API_TOKEN") or os.environ.get("KAGGLE_KEY", "")
 KERNEL_SLUG     = os.environ.get("KAGGLE_KERNEL_SLUG", "cloud-gpu-matcher-v4")
+HF_TOKEN        = os.environ.get("HF_TOKEN", "")
 
 _queue: list  = []
 _current_status: str | None = None
@@ -61,7 +62,8 @@ def _rewrite_and_push(ws_url: str) -> str:
     with open(NOTEBOOK_PATH) as f:
         nb = json.load(f)
 
-    replaced = 0
+    ws_replaced = 0
+    hf_replaced = 0
     for cell in nb.get("cells", []):
         if cell.get("cell_type") != "code":
             continue
@@ -69,12 +71,15 @@ def _rewrite_and_push(ws_url: str) -> str:
         for line in cell["source"]:
             if "WS_URL_PLACEHOLDER" in line and "REPLACE_ME" in line:
                 new_src.append(f'WS_URL_PLACEHOLDER = "{ws_url}"\n')
-                replaced += 1
+                ws_replaced += 1
+            elif "HF_TOKEN_PLACEHOLDER" in line and HF_TOKEN:
+                new_src.append(line.replace("HF_TOKEN_PLACEHOLDER", HF_TOKEN))
+                hf_replaced += 1
             else:
                 new_src.append(line)
         cell["source"] = new_src
 
-    logger.info(f"WS_URL → {ws_url} ({replaced} replacement(s))")
+    logger.info(f"WS_URL → {ws_url} ({ws_replaced} repl); HF_TOKEN injected: {hf_replaced > 0}")
 
     kernel_id = f"{KAGGLE_USERNAME}/{KERNEL_SLUG}"
 
