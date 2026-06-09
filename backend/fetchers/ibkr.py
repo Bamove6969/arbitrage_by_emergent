@@ -109,7 +109,7 @@ async def fetch_ibkr_markets(on_progress: callable = None) -> List[Dict[str, Any
     else:
         host = gateway_url
     
-    # Determine port - default 4001 for Gateway API
+    # Determine configured port; auto-detect actual listening port as fallback
     if ":" in gateway_url:
         try:
             port = int(gateway_url.split(":")[-1].split("/")[0])
@@ -117,27 +117,32 @@ async def fetch_ibkr_markets(on_progress: callable = None) -> List[Dict[str, Any
             port = 4001
     else:
         port = 4001
-    
+
+    # Build ordered port list: configured port first, then the other common gateway port
+    _other = 4000 if port != 4000 else 4001
+    ports_to_try = [port, _other]
+
     try:
-        # Connect to IB Gateway via Docker network.
-        # Random clientId avoids "already connected" errors from stale previous sessions.
         client_id = random.randint(10, 999)
         connected = False
-        for attempt in range(1, 3):
-            try:
-                logger.info(f"Connecting to IBKR TWS/Gateway ({host}:{port}), clientId={client_id}, attempt {attempt}/2...")
-                await asyncio.wait_for(ib.connectAsync(host, port, clientId=client_id), timeout=15.0)
-                connected = True
+        for try_port in ports_to_try:
+            if connected:
                 break
-            except Exception as conn_err:
-                logger.warning(f"IBKR connection attempt {attempt} failed: {conn_err}")
-                if attempt < 2:
-                    logger.info("Retrying in 5 seconds...")
-                    await asyncio.sleep(5)
-                    client_id = random.randint(10, 999)  # Try a fresh ID on retry
-        
+            for attempt in range(1, 3):
+                try:
+                    logger.info(f"Connecting to IBKR TWS/Gateway ({host}:{try_port}), clientId={client_id}, attempt {attempt}/2...")
+                    await asyncio.wait_for(ib.connectAsync(host, try_port, clientId=client_id), timeout=15.0)
+                    connected = True
+                    port = try_port
+                    break
+                except Exception as conn_err:
+                    logger.warning(f"IBKR connection attempt {attempt} on port {try_port} failed: {conn_err}")
+                    if attempt < 2:
+                        await asyncio.sleep(5)
+                        client_id = random.randint(10, 999)
+
         if not connected:
-            logger.error("IBKR: Could not connect after 2 attempts. Skipping IBKR markets.")
+            logger.error("IBKR: Could not connect on ports %s. Skipping IBKR markets.", ports_to_try)
             return []
         
         # We need to map the raw contracts back to our uniform Market structure

@@ -29,7 +29,7 @@ fi
 
 # ---------------------------------------------------------------------------
 # 1. IB Gateway (ibga). Triggers the IBKey 2FA push to the user's phone.
-#    The API port (4001) opens once the push is approved. IBKR only honours
+#    The API port opens once the push is approved. IBKR only honours
 #    one push at a time -- if the user misses it (~2 min window), the
 #    login attempt expires and a fresh push has to be sent. We do that
 #    here by restarting the ibga manager.
@@ -111,17 +111,18 @@ EXECUTOR_PID=$!
 sleep 3
 
 # ---------------------------------------------------------------------------
-# 5. Wait for the 2FA gate at localhost:4001. Re-send the push every
+# 5. Wait for the 2FA gate at IBG_PORT_INTERNAL. Re-send the push every
 #    TWO_FA_WINDOW seconds (default 120s) up to MAX_2FA_RETRIES attempts.
 # ---------------------------------------------------------------------------
-echo "[5/5] Waiting on IBKR 2FA approval (localhost:4001)..."
+IBG_PORT="${IBG_PORT_INTERNAL:-4000}"
+echo "[5/5] Waiting on IBKR 2FA approval (localhost:${IBG_PORT})..."
 
 ibga_up=0
 for attempt in $(seq 1 "$MAX_2FA_RETRIES"); do
     echo "    [push ${attempt}/${MAX_2FA_RETRIES}] approve the IBKey notification on your phone within ${TWO_FA_WINDOW}s"
     deadline=$(( $(date +%s) + TWO_FA_WINDOW ))
     while [ "$(date +%s)" -lt "$deadline" ]; do
-        if nc -z localhost 4001 2>/dev/null; then
+        if nc -z localhost "${IBG_PORT}" 2>/dev/null; then
             ibga_up=1
             echo "    IBKR API armed (push #${attempt} approved)"
             break

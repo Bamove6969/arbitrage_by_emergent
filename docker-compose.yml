@@ -29,8 +29,8 @@ services:
       - IB_LOGINTAB=IB API
       - IB_LOGINTYPE=Live Trading
       - IB_PREFER_IBKEY=true
-      - IBG_PORT_INTERNAL=4001
-      - IB_GATEWAY_URL=http://localhost:4001
+      - IBG_PORT_INTERNAL=4000
+      - IB_GATEWAY_URL=http://localhost:4000
       - IBGA_WAIT_TIMEOUT=${IBGA_WAIT_TIMEOUT:-600}
       # ----- Backend / LLM -----
       - PYTHONPATH=/app
