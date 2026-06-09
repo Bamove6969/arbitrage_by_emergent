@@ -45,6 +45,7 @@ scan_state = {
     "completed_comparisons": 0,
     "pairs_found": 0,
     "auto_scan_enabled": False,
+    "ibkr_scan_rounds_done": 0,  # tracks IBKR's 2-pass discovery (1=REST done, 2=TWS+REST round 2 done)
 }
 
 _scan_signal = asyncio.Event()
@@ -92,7 +93,7 @@ def set_cloud_results(results: List[Dict[str, Any]], clear: bool = True):
     top_k = sorted_results[:TOP_K]
     
     # Save full results to JSON for audit trail
-    results_dir = "/mnt/shared/Download"
+    results_dir = "/app/data/results"
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     results_file = f"{results_dir}/arb_results_{timestamp}.json"
     
@@ -554,139 +555,90 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
         # -------------------------------------------------------
 
         if _all_opportunities:
-            # Colab results exist — refresh their prices with the new market data
+            # Kaggle results already present — refresh prices with fresh market data
             scan_state["progress"] = 48
             scan_state["phase"] = "Refreshing prices"
-            scan_state["message"] = f"Updating prices on {len(_all_opportunities)} Colab results..."
-            logger.info(f"Local scan refreshing prices on {len(_all_opportunities)} Colab results...")
+            scan_state["message"] = f"Updating prices on {len(_all_opportunities)} Kaggle results..."
+            logger.info(f"Local scan refreshing prices on {len(_all_opportunities)} Kaggle results...")
             await refresh_top_leads(limit=len(_all_opportunities))
-            scan_state["message"] = f"Prices refreshed. {len(_all_opportunities)} Colab opportunities ready."
+            scan_state["message"] = f"Prices refreshed. {len(_all_opportunities)} opportunities ready."
         else:
-            # Wait for IBKR to complete both scans (takes ~5 minutes)
-            scan_state["message"] = "Waiting for IBKR scans to complete..."
-            logger.info("IBKR runs 2 scans - waiting 6 minutes for completion...")
-            scan_state["progress"] = 48
-            scan_state["phase"] = "IBKR scanning"
-            await asyncio.sleep(360)  # 6 minutes for IBKR to finish both scans
-            
-            # Upload to Colab and auto-execute via Colab API
+            # ── IBKR round 1 already ran in the gather above ──────────────────
+            # Round 1 typically returns ~1 000 markets (REST category tree pass).
+            # Round 2 (another full fetch a minute later) returns ~120 000 markets
+            # because TWS subscriptions have had time to propagate bid/ask data.
+            ibkr_r1 = results.get("IBKR", [])
+            scan_state["ibkr_scan_rounds_done"] = 1
+            logger.info(f"IBKR round 1 complete: {len(ibkr_r1)} markets")
+
+            scan_state["phase"] = "IBKR round 2"
+            scan_state["message"] = f"IBKR round 1 done ({len(ibkr_r1):,} markets). Starting round 2 (full TWS depth)..."
+            scan_state["progress"] = 50
+            _broadcast_state()
+
+            # Brief pause so TWS can propagate more bid/ask ticks before round 2
+            await asyncio.sleep(90)
+
+            results_r2: dict = {}
+            ibkr_func_r2 = platform_map["ibkr"][1]
+            await _fetch_with_progress("IBKR_R2", ibkr_func_r2, results_r2)
+            ibkr_r2 = results_r2.get("IBKR_R2", [])
+
+            # Merge: round-2 is authoritative; add any extras from round-1
+            ibkr_r2_ids = {m["id"] for m in ibkr_r2}
+            ibkr_extra  = [m for m in ibkr_r1 if m["id"] not in ibkr_r2_ids]
+            results["IBKR"] = ibkr_r2 + ibkr_extra
+
+            scan_state["ibkr_scan_rounds_done"] = 2
+            logger.info(f"IBKR round 2 complete: {len(ibkr_r2)} markets (merged total: {len(results['IBKR'])})")
+
+            # Rebuild the combined market list with fresh IBKR data
+            poly_markets  = results.get("Polymarket", [])
+            pi_markets    = results.get("PredictIt",  [])
+            ibkr_markets  = results["IBKR"]
+            all_markets_merged = poly_markets + pi_markets + ibkr_markets
+
+            # Tag weather
+            for m in all_markets_merged:
+                title_lower = m.get("title", "").lower()
+                m["isWeather"] = 1 if any(kw in title_lower for kw in [
+                    "temperature","rain","snow","precipitation","weather","climate",
+                    "storm","hurricane","degree","high in","low in","forecast",
+                ]) else 0
+
+            _all_markets.clear()
+            _all_markets.extend(all_markets_merged)
+            scan_state["total_markets"] = len(_all_markets)
+
+            scan_state["phase"] = "Triggering Kaggle"
+            scan_state["message"] = f"Both IBKR scans done. Pushing notebook to Kaggle ({len(_all_markets):,} markets)..."
+            scan_state["progress"] = 55
+            _broadcast_state()
+
+            # ── Trigger Kaggle executor ────────────────────────────────────────
             try:
-                import os
-                import requests
-                notebook_path = '/app/Cloud_GPU_Matcher_v4_Stable.ipynb'
-                
-                if os.path.exists(notebook_path):
-                    logger.info(f"Preparing Colab notebook: {notebook_path}")
-
-                    # Parse the notebook as JSON so we can rewrite the WS_URL
-                    # placeholder safely (raw string replace would inject
-                    # unescaped quotes into the .ipynb JSON).
-                    with open(notebook_path, 'r') as f:
-                        notebook_json = json.load(f)
-
-                    try:
-                        import httpx
-                        # ngrok runs in the same container now -- always localhost.
-                        ngrok_api = None
-                        try:
-                            resp = httpx.get("http://localhost:4040/api/tunnels", timeout=5.0)
-                            if resp.status_code == 200:
-                                ngrok_api = resp
-                        except Exception:
-                            pass
-                        tunnels = ngrok_api.json().get("tunnels", []) if ngrok_api else []
-                        if tunnels:
-                            ngrok_url = tunnels[0].get("public_url", "")
-                            ws_url = ngrok_url.replace("https://", "wss://") + "/ws"
-                            replaced = 0
-                            for cell in notebook_json.get("cells", []):
-                                if cell.get("cell_type") != "code":
-                                    continue
-                                new_source = []
-                                for line in cell.get("source", []):
-                                    if "WS_URL_PLACEHOLDER" in line and "REPLACE_ME" in line:
-                                        new_source.append(
-                                            f'WS_URL_PLACEHOLDER = "{ws_url}"\n'
-                                        )
-                                        replaced += 1
-                                    else:
-                                        new_source.append(line)
-                                cell["source"] = new_source
-                            logger.info(
-                                f"Notebook WS_URL updated to: {ws_url} ({replaced} line(s) replaced)"
-                            )
-                        else:
-                            logger.warning("No ngrok tunnel found - notebook will fail to connect")
-                    except Exception as e:
-                        logger.warning(f"Could not update WS_URL: {e}")
-
-                    # Serialise back to string for Gist upload
-                    notebook_content = json.dumps(notebook_json, indent=1)
-                    
-                    # Upload to GitHub Gist
-                    github_token = os.environ.get('GITHUB_TOKEN')
-                    if not github_token:
-                        logger.error("No GitHub token - add GITHUB_TOKEN to .env")
-                        scan_state["message"] = "GitHub auth missing"
-                    else:
-                        gist_data = {
-                            'description': f'Arbitrage Scanner - {datetime.utcnow().isoformat()}',
-                            'public': True,
-                            'files': {
-                                'Cloud_GPU_Matcher_v4_Stable.ipynb': {
-                                    'content': notebook_content
-                                }
-                            }
-                        }
-                        
-                        gist_resp = requests.post(
-                            'https://api.github.com/gists',
-                            json=gist_data,
-                            headers={
-                                'Authorization': f'token {github_token}',
-                                'Accept': 'application/vnd.github.v3+json'
-                            },
-                            timeout=30
-                        )
-                        
-                        if gist_resp.status_code == 201:
-                            gist = gist_resp.json()
-                            gist_id = gist['id']
-                            logger.info(f"Gist created: {gist_id}")
-
-                            # Trigger Oracle Cloud executor to auto-run the notebook
-                            oracle_executor_url = os.environ.get('ORACLE_EXECUTOR_URL', 'http://localhost:5000')
-
-                            try:
-                                logger.info(f"Triggering Colab executor: {oracle_executor_url}")
-                                exec_resp = requests.post(
-                                    f'{oracle_executor_url}/execute',
-                                    json={'gist_id': gist_id, 'owner': 'Bamove6969'},
-                                    timeout=10
-                                )
-                                if exec_resp.status_code == 200:
-                                    exec_data = exec_resp.json()
-                                    logger.info(f"Executor queued: {exec_data}")
-                                    scan_state["message"] = f"Colab auto-executing (queue: {exec_data.get('queue_position', '?')})"
-                                    scan_state["gist_id"] = gist_id
-                                    scan_state["executor_status"] = "queued"
-                                else:
-                                    logger.warning(f"Executor response: {exec_resp.status_code}")
-                                    colab_url = f'https://colab.research.google.com/gist/Bamove6969/{gist_id}/Cloud_GPU_Matcher_v4_Stable.ipynb'
-                                    scan_state["message"] = f"Executor failed - manual: {colab_url}"
-                                    scan_state["colab_url"] = colab_url
-                            except Exception as e:
-                                logger.warning(f"Could not reach Oracle executor: {e}")
-                                colab_url = f'https://colab.research.google.com/gist/Bamove6969/{gist_id}/Cloud_GPU_Matcher_v4_Stable.ipynb'
-                                scan_state["message"] = f"Executor offline - manual: {colab_url}"
-                                scan_state["colab_url"] = colab_url
-                        else:
-                            logger.error(f"GitHub API error: {gist_resp.status_code}")
-                            scan_state["message"] = "GitHub upload failed"
+                import requests as _req
+                kaggle_executor_url = os.environ.get("ORACLE_EXECUTOR_URL", "http://localhost:5000")
+                logger.info(f"Triggering Kaggle executor at {kaggle_executor_url}")
+                exec_resp = _req.post(
+                    f"{kaggle_executor_url}/execute",
+                    json={},   # executor fetches ngrok URL itself
+                    timeout=15,
+                )
+                if exec_resp.status_code == 200:
+                    exec_data = exec_resp.json()
+                    logger.info(f"Kaggle executor queued: {exec_data}")
+                    scan_state["message"] = (
+                        f"Kaggle notebook queued (pos {exec_data.get('queue_position','?')}). "
+                        f"Notebook polling for scan completion before fetching markets."
+                    )
+                    scan_state["kaggle_kernel"] = f"bamove6969/cloud-gpu-matcher-v4"
+                    scan_state["executor_status"] = "queued"
                 else:
-                    logger.warning(f"Notebook not found: {notebook_path}")
+                    logger.warning(f"Kaggle executor HTTP {exec_resp.status_code}: {exec_resp.text[:200]}")
+                    scan_state["message"] = "Kaggle executor unreachable — trigger manually at kaggle.com"
             except Exception as e:
-                logger.error(f"Colab automation error: {e}")
+                logger.error(f"Kaggle executor trigger error: {e}")
 
         scan_state["progress"] = 50
         scan_state["phase"] = "Waiting for Cloud GPU"

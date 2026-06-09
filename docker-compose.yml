@@ -16,7 +16,7 @@ services:
       - 1.1.1.1
     ports:
       - "8000:8000"    # FastAPI backend
-      - "5000:5000"    # Colab executor + /colab-setup page
+      - "5000:5000"    # Kaggle executor
       - "4040:4040"    # ngrok inspector
       - "11434:11434"  # Ollama API
     environment:
@@ -47,12 +47,10 @@ services:
       # ----- ngrok -----
       - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
       - NGROK_DOMAIN=${NGROK_DOMAIN:-copyrightable-pseudocartilaginous-sade.ngrok-free.dev}
-      # ----- Optional: Google / Colab service-account auth -----
-      - GOOGLE_REFRESH_TOKEN=${GOOGLE_REFRESH_TOKEN}
-      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-      - COLAB_NOTEBOOK_DRIVE_ID=${COLAB_NOTEBOOK_DRIVE_ID}
-      - COLAB_AUTH_STATE=/app/data/colab_state.json
+      # ----- Kaggle executor -----
+      - KAGGLE_USERNAME=${KAGGLE_USERNAME:-bamove6969}
+      - KAGGLE_API_TOKEN=${KAGGLE_API_TOKEN}
+      - KAGGLE_KERNEL_SLUG=${KAGGLE_KERNEL_SLUG:-cloud-gpu-matcher-v4}
     volumes:
       - ./data:/home/ibg_settings
       - ./backend:/app/backend

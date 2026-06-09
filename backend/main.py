@@ -204,6 +204,133 @@ async def health():
     return {"status": "ok", "service": "arbitrage-backend"}
 
 
+@app.get("/live", response_class=None)
+async def live_monitor():
+    """Real-time scan monitor. Accessible via the ngrok public URL."""
+    from fastapi.responses import HTMLResponse
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Arbitrage Scanner — Live</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0a0e1a;color:#e2e8f0;font-family:'Courier New',monospace;padding:12px;font-size:13px}
+h1{color:#7dd3fc;font-size:18px;margin-bottom:12px;letter-spacing:1px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.card{background:#111827;border:1px solid #1e3a5f;border-radius:8px;padding:12px}
+.label{color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.value{color:#f1f5f9;font-size:20px;font-weight:bold}
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:bold;margin-top:4px}
+.scanning{background:#1e3a5f;color:#7dd3fc}
+.complete{background:#052e16;color:#4ade80}
+.idle{background:#1c1917;color:#78716c}
+.error{background:#450a0a;color:#f87171}
+.waiting{background:#2d1b4e;color:#a78bfa}
+#progress-bar-wrap{background:#1e293b;border-radius:4px;height:8px;margin:8px 0}
+#progress-bar{background:#3b82f6;height:8px;border-radius:4px;transition:width .3s}
+#phase{color:#7dd3fc;font-size:12px;margin-bottom:4px}
+#message{color:#94a3b8;font-size:12px;margin-bottom:8px;min-height:16px}
+#ibkr-rounds{color:#f59e0b;font-size:13px;margin-bottom:8px}
+#log-box{background:#0d1117;border:1px solid #1e3a5f;border-radius:6px;padding:10px;height:340px;overflow-y:auto;font-size:11px;line-height:1.5}
+.log-line{color:#94a3b8}
+.log-line.INFO{color:#93c5fd}
+.log-line.WARN{color:#fbbf24}
+.log-line.ERROR{color:#f87171}
+#platform-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px}
+.plat{background:#0f172a;border:1px solid #1e3a5f;border-radius:6px;padding:6px;text-align:center}
+.plat-name{font-size:10px;color:#64748b}
+.plat-count{font-size:16px;color:#7dd3fc;font-weight:bold}
+</style>
+</head>
+<body>
+<h1>⚡ ARBITRAGE SCANNER — LIVE</h1>
+
+<div class="grid">
+<div class="card">
+  <div class="label">Status</div>
+  <div id="status-badge" class="badge idle">idle</div>
+  <div id="ibkr-rounds">IBKR rounds: 0 / 2</div>
+  <div id="phase">—</div>
+  <div id="message"></div>
+  <div id="progress-bar-wrap"><div id="progress-bar" style="width:0%"></div></div>
+</div>
+<div class="card">
+  <div class="label">Markets Loaded</div>
+  <div id="total-markets" class="value">0</div>
+  <div id="platform-stats">
+    <div class="plat"><div class="plat-name">Polymarket</div><div id="c-poly" class="plat-count">0</div></div>
+    <div class="plat"><div class="plat-name">PredictIt</div><div id="c-pi" class="plat-count">0</div></div>
+    <div class="plat"><div class="plat-name">IBKR</div><div id="c-ibkr" class="plat-count">0</div></div>
+  </div>
+</div>
+</div>
+
+<div class="card" style="margin-bottom:10px">
+  <div class="label">Log Stream</div>
+  <div id="log-box"></div>
+</div>
+
+<script>
+const badgeClass = {scanning:'scanning',complete:'complete',idle:'idle',error:'error',
+                    waiting_for_cloud:'waiting',fetching:'scanning'};
+
+async function pollStatus() {
+  try {
+    const r = await fetch('/api/scan-status');
+    const s = await r.json();
+    const sb = document.getElementById('status-badge');
+    sb.textContent = s.status || 'idle';
+    sb.className = 'badge ' + (badgeClass[s.status] || 'idle');
+    document.getElementById('phase').textContent = s.phase || '—';
+    document.getElementById('message').textContent = s.message || '';
+    document.getElementById('progress-bar').style.width = (s.progress||0)+'%';
+    document.getElementById('ibkr-rounds').textContent =
+      'IBKR rounds: ' + (s.ibkr_scan_rounds_done||0) + ' / 2';
+    document.getElementById('total-markets').textContent =
+      (s.total_markets||0).toLocaleString();
+  } catch(e) {}
+}
+
+async function pollStats() {
+  try {
+    const r = await fetch('/api/market-stats');
+    const s = await r.json();
+    document.getElementById('c-poly').textContent  = (s.polymarket||0).toLocaleString();
+    document.getElementById('c-pi').textContent    = (s.predictit||0).toLocaleString();
+    document.getElementById('c-ibkr').textContent  = (s.ibkr||0).toLocaleString();
+  } catch(e) {}
+}
+
+const logBox = document.getElementById('log-box');
+const LEVELS = ['ERROR','WARN','INFO'];
+function appendLog(line) {
+  const d = document.createElement('div');
+  d.className = 'log-line ' + (LEVELS.find(l => line.includes('['+l+']')) || '');
+  d.textContent = line;
+  logBox.appendChild(d);
+  if (logBox.children.length > 300) logBox.removeChild(logBox.firstChild);
+  logBox.scrollTop = logBox.scrollHeight;
+}
+
+const es = new EventSource('/api/logs');
+es.onmessage = e => {
+  try {
+    const d = JSON.parse(e.data);
+    (d.logs||[]).forEach(l => appendLog(l));
+  } catch(_) {}
+};
+
+setInterval(pollStatus, 2000);
+setInterval(pollStats,  5000);
+pollStatus(); pollStats();
+</script>
+</body>
+</html>"""
+    return HTMLResponse(html)
+
+
 @app.get("/api/llm-matches")
 async def llm_matches():
     """Confirmed binary exact-matches after the two-gemma verification pass."""

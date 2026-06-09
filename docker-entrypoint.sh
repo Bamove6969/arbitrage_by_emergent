@@ -1,5 +1,5 @@
 #!/bin/bash
-# Universal entrypoint: IB Gateway + Ollama + ngrok + Colab executor + backend
+# Universal entrypoint: IB Gateway + Ollama + ngrok + Kaggle executor + backend
 # All in one container, ordered so the 2FA gate at IBKR doesn't block the rest of
 # the stack from being ready by the time the user approves the IBKey push.
 
@@ -94,12 +94,19 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 4. Colab executor (Playwright). Uses a saved storage_state for Colab auth.
-#    If state is missing, visit http://<your-host>:5000/colab-setup from the
-#    Pixel to paste cookies once.
+# 4. Kaggle executor — pushes the v4 notebook to Kaggle and monitors it.
+#    Writes ~/.kaggle/kaggle.json from env vars so the CLI works without a
+#    pre-baked credential file inside the image.
 # ---------------------------------------------------------------------------
-echo "[4/5] Starting Colab executor (Playwright)..."
-python3 /app/colab_executor.py > "$LOG_DIR/colab_executor.log" 2>&1 &
+echo "[4/5] Starting Kaggle executor..."
+mkdir -p /root/.kaggle
+printf '{"username":"%s","key":"%s"}\n' \
+    "${KAGGLE_USERNAME:-bamove6969}" \
+    "${KAGGLE_API_TOKEN:-${KAGGLE_KEY:-}}" \
+    > /root/.kaggle/kaggle.json
+chmod 600 /root/.kaggle/kaggle.json
+
+python3 /app/kaggle_executor.py > "$LOG_DIR/kaggle_executor.log" 2>&1 &
 EXECUTOR_PID=$!
 sleep 3
 

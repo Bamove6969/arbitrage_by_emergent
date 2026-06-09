@@ -3,7 +3,7 @@
 # Builds on heshiming/ibga so IB Gateway (Java + IBC + Xvfb) is already installed.
 # ===========================================
 
-FROM heshiming/ibga
+FROM heshiming/ibga:latest
 
 USER root
 WORKDIR /app
@@ -33,6 +33,8 @@ RUN uv pip install --system --break-system-packages -r requirements.txt \
         flask \
         playwright \
         nest_asyncio \
+        kaggle \
+        rapidfuzz \
     && playwright install --with-deps chromium
 
 # ngrok (auto-detect architecture)
@@ -54,6 +56,7 @@ RUN curl -fsSL https://ollama.com/install.sh | sh
 COPY backend/ backend/
 COPY main.py .
 COPY colab_executor.py .
+COPY kaggle_executor.py .
 # v4-stable is the primary notebook (bge-m3 + reranker, pure torch on T4).
 # v3 stays in the image as a fallback.
 COPY Cloud_GPU_Matcher_v4_Stable.ipynb .
