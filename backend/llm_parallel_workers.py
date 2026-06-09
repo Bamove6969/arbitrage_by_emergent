@@ -4,8 +4,9 @@ Parallel LLM Verification — 2 instances × 2 workers = 4 concurrent slots.
 Each pair goes through two checks:
   1. Hard binary filter  — market data must show outcomeCount == 2 for BOTH sides.
      Anything with 1 or 3+ outcomes is disqualified immediately, no LLM call needed.
-  2. Semantic equivalence — Gemma via OpenRouter reads the two questions and decides
-     whether they are asking about EXACTLY the same real-world event/outcome.
+  2. Semantic equivalence — local Ollama (OLLAMA_MODEL, two instances × 2 workers each)
+     reads the two questions and decides whether they are asking about EXACTLY the same
+     real-world event/outcome.
      Questions that look identical but have different resolution conditions are rejected.
      Questions that look different but mean the same thing are approved.
 
@@ -24,14 +25,12 @@ import httpx
 logger = logging.getLogger(__name__)
 
 # ── Config ─────────────────────────────────────────────────────────────────────
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
-OPENROUTER_URL     = "https://openrouter.ai/api/v1/chat/completions"
-# Gemma 3 27B instruction-tuned on OpenRouter — matches the Gemma 4 27B used on Kaggle
-# Override with OLLAMA_MODEL env var if a different model is preferred
-_DEFAULT_MODEL = "google/gemma-3-27b-it"
-LLM_MODEL      = os.environ.get("OLLAMA_MODEL", _DEFAULT_MODEL)
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+LLM_MODEL       = os.environ.get("OLLAMA_MODEL", "gemma4:27b")
 
 # 4 total concurrent LLM slots (2 instances × 2 workers each)
+# Ollama's OLLAMA_NUM_PARALLEL=2 and OLLAMA_MAX_LOADED_MODELS=2 (set in docker-compose)
+# handle the server-side concurrency; the semaphore caps client-side to 4.
 _SEMAPHORE: asyncio.Semaphore | None = None
 
 
@@ -117,27 +116,22 @@ async def _verify_pair(pair: Dict, worker_id: int) -> Dict:
 
     async with _sem():
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(timeout=120.0) as client:
                 resp = await client.post(
-                    OPENROUTER_URL,
-                    headers={
-                        "Authorization":  f"Bearer {OPENROUTER_API_KEY}",
-                        "HTTP-Referer":   "https://github.com/Bamove6969/arbitrage-calculator-main",
-                        "X-Title":        "Arbitrage Scanner",
-                    },
+                    f"{OLLAMA_BASE_URL}/api/generate",
                     json={
-                        "model":       LLM_MODEL,
-                        "messages":    [{"role": "user", "content": prompt}],
-                        "temperature": 0.1,
-                        "max_tokens":  150,
+                        "model":  LLM_MODEL,
+                        "prompt": prompt,
+                        "stream": False,
+                        "options": {"temperature": 0.1, "num_predict": 150},
                     },
                 )
                 resp.raise_for_status()
-                content = resp.json()["choices"][0]["message"]["content"].strip()
+                content = resp.json().get("response", "").strip()
         except Exception as exc:
-            logger.warning(f"[worker {worker_id}] LLM call failed: {exc}")
+            logger.warning(f"[worker {worker_id}] Ollama call failed: {exc}")
             return {**pair, "isMatch": False,
-                    "explanation": f"LLM error: {exc}", "worker": worker_id}
+                    "explanation": f"Ollama error: {exc}", "worker": worker_id}
 
     is_match = bool(re.match(r"MATCH:\s*YES", content, re.IGNORECASE))
     expl_m   = re.search(r"Explanation:\s*(.+)", content, re.IGNORECASE | re.DOTALL)
