@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 NOTEBOOK_PATH   = Path(os.environ.get("NOTEBOOK_PATH", "/app/Cloud_GPU_Matcher_v4_Stable.ipynb"))
-KAGGLE_USERNAME = os.environ.get("KAGGLE_USERNAME", "bamove6969")
+KAGGLE_USERNAME = os.environ.get("KAGGLE_USERNAME", "jessefleming")
 KAGGLE_KEY      = os.environ.get("KAGGLE_API_TOKEN") or os.environ.get("KAGGLE_KEY", "")
-KERNEL_SLUG     = os.environ.get("KAGGLE_KERNEL_SLUG", "cloud-gpu-matcher-v4")
+KERNEL_SLUG     = os.environ.get("KAGGLE_KERNEL_SLUG", "cloud-gpu-matcher-v4-stable")
 HF_TOKEN        = os.environ.get("HF_TOKEN", "")
 
 _queue: list  = []
@@ -40,19 +40,27 @@ def _ensure_kaggle_cfg():
 
 
 def _get_ngrok_ws_url() -> str:
-    """Ask the ngrok inspector API for the active tunnel, return wss:// URL."""
+    """Ask the ngrok inspector API for the backend tunnel, return wss:// URL.
+
+    Only trusts the live inspector — no static-domain fallback. The reserved
+    domain may be claimed by another service (e.g. the LLM server notebook),
+    and pushing a notebook pointed at the wrong service burns a GPU session.
+    """
     try:
         import httpx
         r = httpx.get("http://localhost:4040/api/tunnels", timeout=5)
         tunnels = r.json().get("tunnels", [])
+        # pick the tunnel that forwards to the backend on :8000, not just [0]
+        for t in tunnels:
+            addr = t.get("config", {}).get("addr", "")
+            if addr.endswith(":8000"):
+                pub = t.get("public_url", "")
+                if pub.startswith("https://"):
+                    return pub.replace("https://", "wss://") + "/ws"
         if tunnels:
-            pub = tunnels[0].get("public_url", "")
-            return pub.replace("https://", "wss://") + "/ws"
+            logger.warning(f"No tunnel forwarding to :8000 among {len(tunnels)} tunnels")
     except Exception as e:
         logger.warning(f"ngrok inspector error: {e}")
-    domain = os.environ.get("NGROK_DOMAIN", "")
-    if domain:
-        return f"wss://{domain}/ws"
     return ""
 
 
@@ -67,8 +75,11 @@ def _rewrite_and_push(ws_url: str) -> str:
     for cell in nb.get("cells", []):
         if cell.get("cell_type") != "code":
             continue
+        raw = cell["source"]
+        # source can be a plain string OR a list of strings per nbformat spec
+        lines = raw.splitlines(keepends=True) if isinstance(raw, str) else list(raw)
         new_src = []
-        for line in cell["source"]:
+        for line in lines:
             if "WS_URL_PLACEHOLDER" in line and "REPLACE_ME" in line:
                 new_src.append(f'WS_URL_PLACEHOLDER = "{ws_url}"\n')
                 ws_replaced += 1
@@ -79,6 +90,8 @@ def _rewrite_and_push(ws_url: str) -> str:
                 new_src.append(line)
         cell["source"] = new_src
 
+    if ws_replaced == 0:
+        raise RuntimeError("WS_URL_PLACEHOLDER line not found in notebook — refusing to push a notebook that can't reach the backend")
     logger.info(f"WS_URL → {ws_url} ({ws_replaced} repl); HF_TOKEN injected: {hf_replaced > 0}")
 
     kernel_id = f"{KAGGLE_USERNAME}/{KERNEL_SLUG}"
@@ -93,8 +106,9 @@ def _rewrite_and_push(ws_url: str) -> str:
             "code_file":           NOTEBOOK_PATH.name,
             "language":            "python",
             "kernel_type":         "notebook",
-            "is_private":          False,
+            "is_private":          True,
             "enable_gpu":          True,
+            "accelerator":         "GPU_T4_X2",
             "enable_internet":     True,
             "dataset_sources":     [],
             "competition_sources": [],

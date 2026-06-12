@@ -4,7 +4,7 @@ __pycache__/
 *.pyd
 .Python
 venv/
-venv/
+node_modules/
 *.egg-info/
 dist/
 build/
@@ -25,3 +25,7 @@ markets*.json
 .env
 .env.local
 *.db
+backend/arbitrage.db
+database.db
+arbitrage.db
+*.sqlite3

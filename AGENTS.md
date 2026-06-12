@@ -1,4 +1,4 @@
-# AGENTS.md - Droid Development Environment
+# AGENTS.md - Development Environment
 
 This is a **personal home directory** with multiple projects. User prefers direct execution without excessive explanation.
 
@@ -18,21 +18,18 @@ This is a **personal home directory** with multiple projects. User prefers direc
 
 ## IB Gateway (IBGA)
 ```bash
-cd /home/droid/ibga-trading && docker-compose up -d
+cd /home/micha/ibga-trading && docker-compose up -d
 # Access: http://localhost:15800
 # May need 2FA on first run
 ```
 
 ## Arbitrage Scanner
 ```bash
-cd /home/droid/arbitrage-calculator-main
+cd /home/micha/arbitrage-calculator-main
 
-# Create venv (one-time)
-python3 -m venv venv
-./venv/bin/pip install requests httpx fastapi uvicorn aiohttp aiosqlite ib_insync sqlalchemy pydantic ib_async
-
+# Venv already created at venv/ — all deps installed via uv
 # Start backend (must use subshell to keep running)
-(cd /home/droid/arbitrage-calculator-main && PYTHONPATH=. ./venv/bin/python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 &</dev/null)
+(cd /home/micha/arbitrage-calculator-main && PYTHONPATH=. ./venv/bin/python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 &>/dev/null)
 
 # Check status
 curl http://localhost:8000/api/scan-status
@@ -41,7 +38,8 @@ curl http://localhost:8000/api/scan-status
 curl -X POST http://localhost:8000/api/scan
 
 # Start ngrok for Colab tunnel
-npx ngrok http 8000 &
+~/.local/bin/ngrok http 8000 &
+# or: npx @ngrok/ngrok http 8000
 ```
 
 **Key endpoints:**

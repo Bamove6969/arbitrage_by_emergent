@@ -84,73 +84,129 @@ def _esc(s: Any) -> str:
 
 
 def _sort_key(m: Dict[str, Any]):
-    end = m.get("earliestEndDate") or m.get("marketA", {}).get("endDate") or "9999-12-31"
+    """Rank: match quality DESC -> arbitrage ROI DESC -> soonest end ASC."""
+    try:
+        score = -float(m.get("confidence", m.get("matchScore", 0)) or 0)
+    except (TypeError, ValueError):
+        score = 0.0
     try:
         roi = -float(m.get("roi", 0) or 0)
     except (TypeError, ValueError):
         roi = 0.0
-    return (str(end), roi)
+    end = m.get("earliestEndDate") or m.get("marketA", {}).get("endDate") or "9999-12-31"
+    return (score, roi, str(end))
 
 
-def _market_block(market: Dict[str, Any], label: str) -> str:
+def _market_block(market: Dict[str, Any], label: str, action: str = "") -> str:
     platform = market.get("platform", "Unknown")
-    title = market.get("title", "(no title)")
+    title = market.get("title", "(no title)")   # full text, never truncated
     yes_p = _fmt_pct(market.get("yesPrice"))
     no_p = _fmt_pct(market.get("noPrice"))
-    url = market.get("url")
+    # the notebook sends `marketUrl`; older payloads used `url`
+    url = market.get("marketUrl") or market.get("url")
     end_date = _fmt_date(market.get("endDate"))
     chip = _platform_chip_classes(platform)
 
     if url:
+        # question text itself is the hyperlink to the exact market page
+        title_html = (
+            f'<a href="{_esc(url)}" target="_blank" rel="noopener noreferrer" '
+            f'class="text-base font-medium text-slate-900 leading-snug underline '
+            f'decoration-slate-300 underline-offset-2 hover:decoration-slate-900 '
+            f'hover:text-indigo-700 transition">{_esc(title)}</a>'
+        )
+        platform_html = (
+            f'<a href="{_esc(url)}" target="_blank" rel="noopener noreferrer" '
+            f'class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold '
+            f'ring-1 hover:opacity-75 transition {chip}">{_esc(platform)} &#8599;</a>'
+        )
         button = (
             f'<a href="{_esc(url)}" target="_blank" rel="noopener noreferrer" '
             f'class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium '
             f'bg-slate-900 text-white hover:bg-slate-700 transition shadow-sm">'
-            f'Open on {_esc(platform)} <span aria-hidden="true">&#8599;</span></a>'
+            f'Verify on {_esc(platform)} <span aria-hidden="true">&#8599;</span></a>'
         )
     else:
+        title_html = f'<p class="text-base font-medium text-slate-900 leading-snug">{_esc(title)}</p>'
+        platform_html = (
+            f'<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ring-1 {chip}">'
+            f'{_esc(platform)}</span>'
+        )
         button = (
             '<button disabled class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg '
             'text-sm font-medium bg-slate-200 text-slate-400 cursor-not-allowed">'
             f'No link for {_esc(platform)}</button>'
         )
 
+    action_html = (
+        f'<div class="text-xs font-semibold px-2 py-1 rounded-md bg-amber-50 text-amber-900 '
+        f'ring-1 ring-amber-200 inline-flex w-fit">YOUR TRADE: {_esc(action)}</div>'
+    ) if action else ""
+
     return f"""
       <div class="flex-1 min-w-0 p-5 bg-white rounded-xl ring-1 ring-slate-200 flex flex-col gap-3">
         <div class="flex items-center justify-between gap-2">
           <span class="text-[11px] uppercase tracking-wider font-semibold text-slate-400">{_esc(label)}</span>
-          <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ring-1 {chip}">
-            {_esc(platform)}
-          </span>
+          {platform_html}
         </div>
-        <p class="text-base font-medium text-slate-900 leading-snug">{_esc(title)}</p>
+        {title_html}
         <div class="flex items-center gap-2 text-sm">
           <span class="inline-flex items-center px-2 py-1 rounded-md bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200 font-mono">YES {yes_p}</span>
           <span class="inline-flex items-center px-2 py-1 rounded-md bg-rose-50 text-rose-800 ring-1 ring-rose-200 font-mono">NO {no_p}</span>
         </div>
+        {action_html}
         <div class="text-xs text-slate-500">Ends: {_esc(end_date)}</div>
         <div class="mt-auto pt-2">{button}</div>
       </div>
     """
 
 
+def _trade_actions(m: Dict[str, Any]) -> tuple:
+    """Per-leg trade instruction derived from the arb scenario.
+    1: YES on A + NO on B | 2: NO on A + YES on B | 3 (inverted): YES on both."""
+    if m.get("inverted") or m.get("scenario") == 3:
+        return ("Buy YES", "Buy YES")
+    if m.get("scenario") == 2:
+        return ("Buy NO", "Buy YES")
+    return ("Buy YES", "Buy NO")
+
+
 def _match_card(idx: int, m: Dict[str, Any]) -> str:
     a = m.get("marketA", {}) or {}
     b = m.get("marketB", {}) or {}
     roi = m.get("roi")
-    score = m.get("matchScore")
-    explanation = m.get("explanation") or "No explanation provided."
-    model = m.get("model") or ""
-    worker = m.get("worker") or ""
+    confidence = m.get("confidence")
+    score = confidence if confidence is not None else m.get("matchScore")
+    reasoning = m.get("reasoning") or m.get("explanation") or "No explanation provided."
+    model = m.get("verifyModel") or m.get("model") or ""
+    inverted = bool(m.get("inverted"))
     roi_cls = _roi_classes(roi)
     earliest = _fmt_date(m.get("earliestEndDate") or a.get("endDate") or b.get("endDate"))
+    act_a, act_b = _trade_actions(m)
 
-    meta_bits = []
+    inv_badge = (
+        '<span class="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-semibold '
+        'bg-violet-50 text-violet-800 ring-1 ring-violet-200">INVERTED PAIR — YES on both sides</span>'
+    ) if inverted else ""
+
+    cost = m.get("cost")
+    try:
+        cost_str = f"{float(cost):.3f}" if cost is not None else "—"
+    except (TypeError, ValueError):
+        cost_str = "—"
+
+    detail_rows = []
+    for k, label in (("biEncoderScore", "Embedding similarity"), ("stage2Score", "Reranker score"),
+                     ("stage3Score", "Deep-rerank score"), ("fuzzyScore", "Fuzzy (text) score")):
+        if m.get(k) is not None:
+            detail_rows.append(f'<div class="flex justify-between"><span class="text-slate-500">{label}</span>'
+                               f'<span class="font-mono text-slate-700">{_esc(m.get(k))}</span></div>')
+    detail_rows.append(f'<div class="flex justify-between"><span class="text-slate-500">Combined cost of both legs</span>'
+                       f'<span class="font-mono text-slate-700">{cost_str}</span></div>')
     if model:
-        meta_bits.append(f"model: {_esc(model)}")
-    if worker:
-        meta_bits.append(f"worker: {_esc(worker)}")
-    meta = " &middot; ".join(meta_bits)
+        detail_rows.append(f'<div class="flex justify-between"><span class="text-slate-500">Verified by</span>'
+                           f'<span class="font-mono text-slate-700">{_esc(model)}</span></div>')
+    details = "\n".join(detail_rows)
 
     return f"""
     <article class="group bg-gradient-to-br from-white to-slate-50 rounded-2xl ring-1 ring-slate-200 shadow-sm hover:shadow-md hover:ring-slate-300 transition p-5 sm:p-6"
@@ -161,28 +217,32 @@ def _match_card(idx: int, m: Dict[str, Any]) -> str:
           ROI {_fmt_roi(roi)}
         </span>
         <span class="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-semibold bg-sky-50 text-sky-800 ring-1 ring-sky-200">
-          Match {_fmt_score(score)}
+          Match confidence {_fmt_score(score)}%
         </span>
+        {inv_badge}
         <span class="ml-auto text-xs text-slate-500">Earliest end: <span class="font-medium text-slate-700">{_esc(earliest)}</span></span>
       </header>
 
       <div class="flex flex-col md:flex-row gap-4">
-        {_market_block(a, "Market A")}
+        {_market_block(a, "Market A", action=act_a)}
         <div class="flex md:flex-col items-center justify-center text-slate-300 font-bold select-none">
-          <span class="text-2xl">&harr;</span>
+          <span class="text-2xl">{"&#8645;" if inverted else "&harr;"}</span>
         </div>
-        {_market_block(b, "Market B")}
+        {_market_block(b, "Market B", action=act_b)}
       </div>
 
       <div class="mt-5">
         <button @click="open = !open"
                 class="inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 transition">
           <span x-text="open ? '▾' : '▸'" class="font-mono w-3 inline-block"></span>
-          <span>Why these match</span>
+          <span>Why these match &middot; full scoring detail</span>
         </button>
         <div x-show="open" x-collapse x-cloak class="mt-3 p-4 bg-slate-50 rounded-lg ring-1 ring-slate-200 text-sm text-slate-700 leading-relaxed">
-          <p>{_esc(explanation)}</p>
-          {f'<p class="mt-2 text-xs text-slate-400">{meta}</p>' if meta else ''}
+          <p class="font-medium text-slate-800 mb-2">LLM verdict:</p>
+          <p>{_esc(reasoning)}</p>
+          <div class="mt-3 pt-3 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1.5 text-xs">
+            {details}
+          </div>
         </div>
       </div>
     </article>

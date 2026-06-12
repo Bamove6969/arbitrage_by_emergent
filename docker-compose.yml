@@ -46,11 +46,14 @@ services:
       - OLLAMA_MAX_LOADED_MODELS=2
       # ----- ngrok -----
       - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
-      - NGROK_DOMAIN=${NGROK_DOMAIN:-copyrightable-pseudocartilaginous-sade.ngrok-free.dev}
+      # No default domain: the reserved free-tier domain belongs to the LLM
+      # server / Hermes. The backend tunnel uses an ephemeral URL; the Kaggle
+      # executor reads it live from the ngrok inspector at push time.
+      - NGROK_DOMAIN=${NGROK_DOMAIN:-}
       # ----- Kaggle executor -----
-      - KAGGLE_USERNAME=${KAGGLE_USERNAME:-bamove6969}
+      - KAGGLE_USERNAME=${KAGGLE_USERNAME:-jessefleming}
       - KAGGLE_API_TOKEN=${KAGGLE_API_TOKEN}
-      - KAGGLE_KERNEL_SLUG=${KAGGLE_KERNEL_SLUG:-cloud-gpu-matcher-v4}
+      - KAGGLE_KERNEL_SLUG=${KAGGLE_KERNEL_SLUG:-cloud-gpu-matcher-v4-stable}
       - HF_TOKEN=${HF_TOKEN}
     volumes:
       - ./data:/home/ibg_settings

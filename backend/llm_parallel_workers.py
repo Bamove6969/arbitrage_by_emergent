@@ -4,7 +4,7 @@ Parallel LLM Verification — 2 instances × 2 workers = 4 concurrent slots.
 Each pair goes through two checks:
   1. Hard binary filter  — market data must show outcomeCount == 2 for BOTH sides.
      Anything with 1 or 3+ outcomes is disqualified immediately, no LLM call needed.
-  2. Semantic equivalence — local Ollama (OLLAMA_MODEL, two instances × 2 workers each)
+  2. Semantic equivalence — HuggingFace Inference API (HF_MODEL, 4 concurrent slots)
      reads the two questions and decides whether they are asking about EXACTLY the same
      real-world event/outcome.
      Questions that look identical but have different resolution conditions are rejected.
@@ -18,19 +18,19 @@ import asyncio
 import logging
 import os
 import re
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Tuple
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
 # ── Config ─────────────────────────────────────────────────────────────────────
-OLLAMA_BASE_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-LLM_MODEL       = os.environ.get("OLLAMA_MODEL", "gemma4:27b")
+HF_TOKEN  = os.environ.get("HF_TOKEN", "")
+HF_MODEL  = os.environ.get("HF_MODEL", "google/gemma-3-27b-it")
+HF_API_URL = f"https://api-inference.huggingface.co/models/{HF_MODEL}/v1/chat/completions"
 
-# 4 total concurrent LLM slots (2 instances × 2 workers each)
-# Ollama's OLLAMA_NUM_PARALLEL=2 and OLLAMA_MAX_LOADED_MODELS=2 (set in docker-compose)
-# handle the server-side concurrency; the semaphore caps client-side to 4.
+# 4 concurrent slots — HF serverless handles parallelism server-side;
+# the semaphore prevents thundering-herd on the API.
 _SEMAPHORE: asyncio.Semaphore | None = None
 
 
@@ -111,27 +111,28 @@ async def _verify_pair(pair: Dict, worker_id: int) -> Dict:
                 "explanation": f"DISQUALIFIED (non-binary): {reason}",
                 "worker": worker_id}
 
-    # Step 2 — LLM semantic equivalence check
+    # Step 2 — HuggingFace Inference API semantic equivalence check
     prompt = _build_prompt(market_a, market_b)
 
     async with _sem():
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
                 resp = await client.post(
-                    f"{OLLAMA_BASE_URL}/api/generate",
+                    HF_API_URL,
+                    headers={"Authorization": f"Bearer {HF_TOKEN}"},
                     json={
-                        "model":  LLM_MODEL,
-                        "prompt": prompt,
-                        "stream": False,
-                        "options": {"temperature": 0.1, "num_predict": 150},
+                        "model": HF_MODEL,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": 150,
+                        "temperature": 0.1,
                     },
                 )
                 resp.raise_for_status()
-                content = resp.json().get("response", "").strip()
+                content = resp.json()["choices"][0]["message"]["content"].strip()
         except Exception as exc:
-            logger.warning(f"[worker {worker_id}] Ollama call failed: {exc}")
+            logger.warning(f"[worker {worker_id}] HF API call failed: {exc}")
             return {**pair, "isMatch": False,
-                    "explanation": f"Ollama error: {exc}", "worker": worker_id}
+                    "explanation": f"HF API error: {exc}", "worker": worker_id}
 
     is_match = bool(re.match(r"MATCH:\s*YES", content, re.IGNORECASE))
     expl_m   = re.search(r"Explanation:\s*(.+)", content, re.IGNORECASE | re.DOTALL)
@@ -143,7 +144,7 @@ async def _verify_pair(pair: Dict, worker_id: int) -> Dict:
 # ── Parallel batch processing ──────────────────────────────────────────────────
 
 async def _process_half(pairs: List[Dict], instance_id: int) -> List[Dict]:
-    """One 'instance' processes its 1000 pairs with 2 concurrent workers."""
+    """One 'instance' processes its half with 2 concurrent workers."""
     tasks = [
         _verify_pair(p, worker_id=instance_id * 2 + (i % 2))
         for i, p in enumerate(pairs)
@@ -162,19 +163,18 @@ async def run_parallel_llm_verification(pairs: List[Dict]) -> List[Dict]:
     """
     Main entry point.
 
-    Splits pairs into two halves (1000 each by default for a 2000-pair input),
-    runs both halves in parallel (2 instances × 2 workers = 4 concurrent LLM slots),
+    Splits pairs into two halves, runs both in parallel (4 concurrent HF API slots),
     and returns ALL results — caller filters on result['isMatch'].
 
     To raise the ceiling beyond 2000, increase top_k in the Kaggle notebook.
     """
-    if not OPENROUTER_API_KEY:
-        logger.error("OPENROUTER_API_KEY not set — LLM verification skipped")
+    if not HF_TOKEN:
+        logger.error("HF_TOKEN not set — LLM verification skipped")
         return pairs
 
     logger.info(
         f"LLM verification starting: {len(pairs)} pairs | "
-        f"model={LLM_MODEL} | 2 instances × 2 workers = 4 concurrent slots"
+        f"model={HF_MODEL} | 2 instances × 2 workers = 4 concurrent slots"
     )
 
     mid = len(pairs) // 2

@@ -89,8 +89,8 @@ def set_cloud_results(results: List[Dict[str, Any]], clear: bool = True):
         reverse=True
     )
     
-    # Absolute Best 1000 as requested
-    TOP_K = 1000
+    # Keep all 2000 the notebook sends — matches the notebook's top_k so no GPU work is discarded
+    TOP_K = 2000
     top_k = sorted_results[:TOP_K]
     
     # Save full results to JSON for audit trail
@@ -179,17 +179,18 @@ async def _verify_and_report(matches: List[Dict[str, Any]]):
     """
     global _llm_verified_matches, _latest_report_path
     try:
-        from backend.llm_parallel_workers import run_parallel_llm_verification
+        from backend.llm_verifier import run_llm_verification
         from backend.html_report_generator import generate_html_report
         from datetime import datetime
         from pathlib import Path
 
         scan_state["phase"] = "LLM verification"
-        scan_state["message"] = f"Two Gemma workers analysing {len(matches)} matches..."
+        scan_state["message"] = f"Ollama cloud (gpt-oss:120b + gemma4:31b, 2x2 workers) analysing {len(matches)} matches..."
         _broadcast_state()
 
-        verified = await run_parallel_llm_verification(matches)
-        confirmed = [v for v in verified if v.get("isMatch")]
+        # run_llm_verification returns ONLY confirmed exact matches
+        # (is_exact_match true and confidence >= threshold)
+        confirmed = await run_llm_verification(matches)
 
         scan_state["phase"] = "Generating report"
         scan_state["message"] = f"Confirmed {len(confirmed)} exact matches -- writing report..."

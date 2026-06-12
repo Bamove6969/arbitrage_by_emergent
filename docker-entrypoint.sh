@@ -50,10 +50,23 @@ start_ibga
 echo "    ibga manager booted (log: $LOG_DIR/ibga.log)"
 
 # ---------------------------------------------------------------------------
+# Supervision: set-and-forget means nothing stays dead. Each service runs in
+# a restart loop; if it exits (crash, remote stop, OOM) it comes back in 5s.
+# ---------------------------------------------------------------------------
+supervise() {
+    local name="$1"; shift
+    while true; do
+        "$@"
+        echo "$(date) [supervisor] $name exited (code $?), restarting in 5s" >> "$LOG_DIR/supervisor.log"
+        sleep 5
+    done
+}
+
+# ---------------------------------------------------------------------------
 # 2. Ollama
 # ---------------------------------------------------------------------------
 echo "[2/5] Starting Ollama (OLLAMA_HOST=${OLLAMA_HOST:-0.0.0.0:11434})..."
-ollama serve > "$LOG_DIR/ollama.log" 2>&1 &
+supervise ollama ollama serve >> "$LOG_DIR/ollama.log" 2>&1 &
 OLLAMA_PID=$!
 for i in $(seq 1 30); do
     if curl -sf "http://localhost:11434/api/tags" >/dev/null 2>&1; then
@@ -85,7 +98,7 @@ if [ -n "${NGROK_AUTHTOKEN:-$NGROK_AUTH_TOKEN}" ]; then
     if [ -n "${NGROK_DOMAIN}" ]; then
         NG_ARGS+=("--url=${NGROK_DOMAIN}")
     fi
-    ngrok "${NG_ARGS[@]}" > "$LOG_DIR/ngrok.log" 2>&1 &
+    supervise ngrok ngrok "${NG_ARGS[@]}" >> "$LOG_DIR/ngrok.log" 2>&1 &
     NGROK_PID=$!
     sleep 4
     echo "    ngrok up (inspector on :4040)"
@@ -101,7 +114,7 @@ fi
 echo "[4/5] Starting Kaggle executor..."
 mkdir -p /root/.kaggle
 printf '{"username":"%s","key":"%s"}\n' \
-    "${KAGGLE_USERNAME:-bamove6969}" \
+    "${KAGGLE_USERNAME:-jessefleming}" \
     "${KAGGLE_API_TOKEN:-${KAGGLE_KEY:-}}" \
     > /root/.kaggle/kaggle.json
 chmod 600 /root/.kaggle/kaggle.json
@@ -145,7 +158,8 @@ if [ "$ibga_up" -ne 1 ]; then
 fi
 
 # Cleanup on exit
-trap 'kill $IBGA_PID $OLLAMA_PID ${NGROK_PID:-} $EXECUTOR_PID 2>/dev/null || true' EXIT
+# Kill supervisor loops AND their supervised children
+trap 'kill $IBGA_PID $OLLAMA_PID ${NGROK_PID:-} $EXECUTOR_PID 2>/dev/null; pkill -f "ollama serve" 2>/dev/null; pkill -x ngrok 2>/dev/null || true' EXIT
 
 echo "=== Starting backend (Poly + PredictIt + IBKR x2 fan out in parallel) ==="
 exec python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000

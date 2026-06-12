@@ -429,15 +429,12 @@ async def receive_cloud_results(results: List[Dict[str, Any]], clear: bool = Que
                Set to False when sending multiple additive batches.
     """
     from backend.scanner import set_cloud_results
-    from backend.llm_openrouter import verify_matches_openrouter
-    
-    # Store the fuzzy matches
+
+    # Store the fuzzy matches. set_cloud_results kicks off the single
+    # verification + report pipeline (_verify_and_report): local Ollama ->
+    # gemma4:31b-cloud, 2 instances x 2 workers, 2000 split into 2x1000,
+    # then the HTML report is written to /app/reports/.
     set_cloud_results(results, clear=clear)
-    
-    # Run LLM verification in background (OpenRouter - 2 models x 2 workers = 4 parallel)
-    import nest_asyncio
-    nest_asyncio.apply()
-    asyncio.create_task(verify_matches_openrouter(results[:2000], num_workers=2))
     
     return {"status": "success", "imported": len(results), "llm_verifying": True}
 
