@@ -121,8 +121,10 @@ def _rewrite_and_push(ws_url: str) -> str:
             ["kaggle", "kernels", "push", "-p", tmpdir],
             capture_output=True, text=True, env=_kaggle_env, timeout=120,
         )
-        if result.returncode != 0:
-            raise RuntimeError(f"kaggle push failed: {result.stderr.strip()}")
+        out = (result.stdout or "") + (result.stderr or "")
+        # kaggle CLI exits 0 even on quota/permission errors — check the text
+        if result.returncode != 0 or "error" in out.lower():
+            raise RuntimeError(f"kaggle push failed: {out.strip()[:300]}")
         logger.info(f"Kaggle push OK: {result.stdout.strip()}")
 
     return kernel_id

@@ -13,9 +13,10 @@ PAGE_SIZE = 100   # gamma: hard cap 100/page
 CLOB_SIZE = 100   # CLOB: use 100 to stay within documented limits
 
 
-async def fetch_polymarket_markets(limit: int = 50000, on_progress=None) -> List[Dict[str, Any]]:
+async def fetch_polymarket_markets(limit: Optional[int] = None, on_progress=None) -> List[Dict[str, Any]]:
     """
-    Fetch active Polymarket markets.
+    Fetch active Polymarket markets. limit=None (default) means UNLIMITED —
+    pull every active market the API has.
 
     Primary:  CLOB API cursor-based pagination — no offset ceiling, gets all markets.
     Fallback: gamma API with 4 parallel sort orders to bypass the 10k offset cap.
@@ -33,43 +34,78 @@ async def fetch_polymarket_markets(limit: int = 50000, on_progress=None) -> List
         return await _fetch_via_gamma_multisort(client, limit, on_progress)
 
 
-# ── CLOB cursor-based ─────────────────────────────────────────────────────────
+# ── CLOB cursor-based (parallel) ──────────────────────────────────────────────
+# CLOB cursors are base64-encoded integer offsets ("MTAwMA==" == "1000",
+# "LTE=" == "-1" == end), so pages can be fetched CONCURRENTLY with computed
+# cursors instead of waiting for each page to reveal the next. The server also
+# serves ~1000 markets/page regardless of smaller limits. Together: ~140
+# requests in waves of 8 (~1 min) vs the old 1400 sequential pages (~20 min).
+
+CLOB_CONCURRENCY = 8
 
 async def _fetch_via_clob(client: httpx.AsyncClient, limit: int, on_progress) -> List[Dict]:
-    markets: List[Dict] = []
-    next_cursor: Optional[str] = None
-    pages = 0
+    import base64
 
-    while len(markets) < limit:
-        params: dict = {"limit": CLOB_SIZE}
-        if next_cursor:
-            params["next_cursor"] = next_cursor
+    def _cursor_for(offset: int) -> str:
+        return base64.b64encode(str(offset).encode()).decode()
 
-        resp = await client.get(f"{CLOB_API}/markets", params=params, timeout=20.0)
+    async def _get_page(offset: int) -> list:
+        params: dict = {"limit": 1000}
+        if offset > 0:
+            params["next_cursor"] = _cursor_for(offset)
+        resp = await client.get(f"{CLOB_API}/markets", params=params, timeout=30.0)
         resp.raise_for_status()
         data = resp.json()
+        raw = data.get("data", data) if isinstance(data, dict) else data
+        return raw if isinstance(raw, list) else []
 
-        raw: list = data.get("data", data) if isinstance(data, dict) else data
-        if not isinstance(raw, list) or not raw:
-            break
+    # First page also tells us the server's true page size (stride)
+    first = await _get_page(0)
+    if not first:
+        return []
+    stride = len(first)
 
-        next_cursor = (data.get("next_cursor") or "") if isinstance(data, dict) else ""
+    markets: List[Dict] = []
+    seen_ids: set = set()
+    pages = 0
 
+    def _absorb(raw: list) -> None:
+        nonlocal pages
         for m in raw:
             if m.get("closed") or m.get("archived") or not m.get("active", True):
                 continue
             parsed = _parse_clob_market(m)
-            if parsed:
+            if parsed and parsed["id"] not in seen_ids:
+                seen_ids.add(parsed["id"])
                 markets.append(parsed)
-
         pages += 1
         if on_progress:
             on_progress(pages, len(markets))
-        logger.info(f"[CLOB pg {pages}] +{len(raw)} raw → {len(markets)} total")
 
-        if not next_cursor or next_cursor in ("LTE=", ""):
-            break
-        await asyncio.sleep(0.05)
+    _absorb(first)
+    logger.info(f"[CLOB] page size {stride}; fetching in waves of {CLOB_CONCURRENCY}...")
+
+    offset = stride
+    done = False
+    while not done and (limit is None or len(markets) < limit):
+        offsets = [offset + i * stride for i in range(CLOB_CONCURRENCY)]
+        offset += CLOB_CONCURRENCY * stride
+        results = await asyncio.gather(*[_get_page(o) for o in offsets],
+                                       return_exceptions=True)
+        for r in results:  # in offset order — stop at the first short/empty page
+            if isinstance(r, Exception):
+                logger.warning(f"[CLOB] page fetch error ({r}); stopping pagination")
+                done = True
+                break
+            if not r:
+                done = True
+                break
+            _absorb(r)
+            if len(r) < stride:
+                done = True
+                break
+        logger.info(f"[CLOB] {pages} pages → {len(markets)} active markets")
+        await asyncio.sleep(0.1)
 
     return markets
 
@@ -120,8 +156,8 @@ _SORT_CONFIGS = [
 ]
 
 
-async def _fetch_via_gamma_multisort(client: httpx.AsyncClient, limit: int, on_progress) -> List[Dict]:
-    per_sort_limit = min(12000, limit)
+async def _fetch_via_gamma_multisort(client: httpx.AsyncClient, limit: Optional[int], on_progress) -> List[Dict]:
+    per_sort_limit = min(12000, limit) if limit else 12000
 
     async def one_sort(cfg: dict) -> List[Dict]:
         return await _fetch_gamma_single(client, per_sort_limit, cfg)

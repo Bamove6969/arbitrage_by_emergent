@@ -201,17 +201,19 @@ async def fetch_ibkr_markets(on_progress: callable = None) -> List[Dict[str, Any
             batch = ib_contracts[i:i+batch_size]
             batch_tickers = []
             try:
-                # Subscribe to live streaming data for each contract in the batch
+                # Subscribe to live streaming data for each contract in the batch.
+                # Stagger the requests: IBKR drops messages beyond ~50/sec, and
+                # dropped subscriptions mean zero prices + Error 300 on cancel.
                 for contract in batch:
                     ticker = ib.reqMktData(contract, genericTickList="", snapshot=False, regulatorySnapshot=False)
                     batch_tickers.append(ticker)
-                
+                    await asyncio.sleep(0.025)  # ~40 req/sec, under the pacing limit
+
                 # Give TWS time to push back the first wave of bid/ask/last data.
-                # 1.5s is enough for most contracts; snapshots used to take up to 11s/batch.
-                await asyncio.sleep(1.5)
-                
+                await asyncio.sleep(4.0)
+
                 tickers.extend(batch_tickers)
-                
+
             except Exception as e:
                 logger.warning(f"Error streaming batch starting at {i}: {e}")
             finally:
@@ -229,6 +231,17 @@ async def fetch_ibkr_markets(on_progress: callable = None) -> List[Dict[str, Any
             await asyncio.sleep(0.2)
 
         
+        # Sanity check: if NOTHING returned a price, the gateway session is
+        # almost certainly half-dead (API port open but market data auth gone —
+        # happens after IBKR's nightly restart if 2FA wasn't re-approved).
+        n_priced = sum(1 for t in tickers
+                       if (t.bid and t.bid > 0) or (t.ask and t.ask > 0) or (t.last and t.last > 0))
+        if tickers and n_priced == 0:
+            logger.error(
+                "IBKR streaming collected 0 prices across all contracts — "
+                "gateway session likely needs re-authentication (fresh 2FA). "
+                "Restart the IB Gateway / container and approve the IBKey push.")
+
         # Extract prices
         group_prices = {}
         for k in grouped_markets:

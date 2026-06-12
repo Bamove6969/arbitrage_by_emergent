@@ -420,7 +420,7 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
         # Store as lambda to defer execution (and check signature)
         # Note: Manifold removed - it's play-money only, not real funds
         platform_map = {
-            "polymarket": ("Polymarket", lambda on_progress=None: fetch_polymarket_markets(limit=50000, on_progress=on_progress)),
+            "polymarket": ("Polymarket", lambda on_progress=None: fetch_polymarket_markets(on_progress=on_progress)),
             "predictit": ("PredictIt", lambda: fetch_predictit_markets()), # PredictIt doesn't have progress yet
             "ibkr": ("IBKR", lambda on_progress=None: fetch_ibkr_markets(on_progress=on_progress)),
         }
@@ -583,7 +583,22 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
 
             results_r2: dict = {}
             ibkr_func_r2 = platform_map["ibkr"][1]
+
+            # Mirror round-2 progress into the frontend message — without this
+            # the UI freezes on "Starting round 2..." for the whole ~17 min
+            # streaming pass and looks stalled.
+            async def _mirror_r2_progress():
+                while True:
+                    st = _fetch_status.get("IBKR_R2", "starting...")
+                    scan_state["message"] = f"IBKR round 2/2 (warm TWS pass): {st}"
+                    _broadcast_state()
+                    if st.startswith("done") or st == "error":
+                        break
+                    await asyncio.sleep(3)
+
+            _mirror_task = asyncio.create_task(_mirror_r2_progress())
             await _fetch_with_progress("IBKR_R2", ibkr_func_r2, results_r2)
+            _mirror_task.cancel()
             ibkr_r2 = results_r2.get("IBKR_R2", [])
 
             # Merge: round-2 is authoritative; add any extras from round-1
