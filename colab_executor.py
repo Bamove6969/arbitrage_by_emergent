@@ -91,18 +91,36 @@ async def _execute_notebook(gist_id: str, owner: str) -> dict:
             except Exception:
                 logger.info("Menu trigger skipped (keyboard shortcut should have worked)")
 
-            # Monitor up to 15 minutes
-            deadline = time.time() + 900
+            # Monitor up to MONITOR_MAX seconds. The browser MUST stay connected
+            # the whole time — it is the only frontend keeping the free Colab
+            # runtime alive (idle disconnect otherwise). A full run = scan-wait +
+            # fetch ~48k + single-T4 match + push, so give it plenty of room.
+            monitor_max = int(os.environ.get("COLAB_MONITOR_MAX", "7200"))  # 2h
+            deadline = time.time() + monitor_max
+            loops = 0
             while time.time() < deadline:
                 try:
                     content = await page.content()
-                    if "Pipeline complete" in content or "Results sent" in content:
+                    # completion markers the notebook actually prints (cell 6)
+                    if ("Pipeline complete" in content
+                            or "results returned through the ngrok tunnel" in content
+                            or "HTTP fallback OK" in content
+                            or "Results sent" in content):
                         logger.info("Pipeline completed successfully!")
                         await browser.close()
                         return {"status": "success", "gist_id": gist_id}
-                    if "Session crashed" in content or "Runtime disconnected" in content:
-                        logger.warning("Runtime disconnected")
+                    if ("Session crashed" in content
+                            or "Runtime disconnected" in content
+                            or "aborting WITHOUT pulling" in content):
+                        logger.warning("Run ended/aborted (see notebook output)")
                         break
+                    # keep-alive heartbeat so Colab doesn't idle-disconnect
+                    loops += 1
+                    if loops % 4 == 0:
+                        try:
+                            await page.mouse.move(5 + (loops % 20), 5 + (loops % 20))
+                        except Exception:
+                            pass
                 except Exception as e:
                     logger.debug("Monitor: %s", e)
                 await asyncio.sleep(15)

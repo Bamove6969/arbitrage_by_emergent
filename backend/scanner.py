@@ -47,9 +47,81 @@ scan_state = {
     "pairs_found": 0,
     "auto_scan_enabled": False,
     "ibkr_scan_rounds_done": 0,  # tracks IBKR's 2-pass discovery (1=REST done, 2=TWS+REST round 2 done)
+    # live per-platform "loaded" counts, filled as each fetcher finishes its pass
+    # (so the UI can count up live instead of jumping at the end-of-scan merge)
+    "platform_counts": {"polymarket": 0, "predictit": 0, "ibkr": 0},
 }
 
 _scan_signal = asyncio.Event()
+
+# ── Kaggle GPU notebook live state ─────────────────────────────────────────
+# The notebook self-reports per-cell progress via POST /api/kaggle-progress.
+# Stage indices match the notebook's executable cells (cell 0 is markdown).
+KAGGLE_STAGES = [
+    "Install + GPU check",
+    "Load models (Qwen3-Embed → bge-reranker → Qwen3-Reranker)",
+    "Fetch markets (WebSocket) + noise pre-filter",
+    "Compatibility filters (dates / numbers / proper nouns)",
+    "GPU matching (embed → rerank → rerank)",
+    "Send results back",
+    "Preview top opportunities",
+]
+
+
+def _fresh_kaggle_stages() -> List[Dict[str, Any]]:
+    return [
+        {"index": i, "name": name, "status": "pending", "message": "",
+         "started_at": None, "ended_at": None}
+        for i, name in enumerate(KAGGLE_STAGES)
+    ]
+
+
+kaggle_state = {
+    "running": False,          # True once the notebook starts beaconing
+    "kernel": None,            # e.g. jessefleming/cloud-gpu-matcher-v4-stable
+    "current_stage": None,     # index of the active stage
+    "started_at": None,        # ISO ts of first beacon
+    "updated_at": None,        # ISO ts of last beacon
+    "stages": _fresh_kaggle_stages(),
+}
+
+
+def get_kaggle_state() -> dict:
+    return {**kaggle_state, "stages": [dict(s) for s in kaggle_state["stages"]]}
+
+
+def reset_kaggle_state(kernel: Optional[str] = None):
+    """Clear per-stage state for a new Kaggle run (called when executor is queued)."""
+    kaggle_state["running"] = False
+    kaggle_state["kernel"] = kernel
+    kaggle_state["current_stage"] = None
+    kaggle_state["started_at"] = None
+    kaggle_state["updated_at"] = None
+    kaggle_state["stages"] = _fresh_kaggle_stages()
+
+
+def update_kaggle_stage(index: int, status: str, message: str = "") -> dict:
+    """Apply a beacon from the notebook. status: running | done | error."""
+    now = datetime.utcnow().isoformat()
+    if not kaggle_state["started_at"]:
+        kaggle_state["started_at"] = now
+    kaggle_state["running"] = status != "error"
+    kaggle_state["updated_at"] = now
+    if 0 <= index < len(kaggle_state["stages"]):
+        st = kaggle_state["stages"][index]
+        st["status"] = status
+        if message:
+            st["message"] = message
+        if status == "running" and not st["started_at"]:
+            st["started_at"] = now
+            kaggle_state["current_stage"] = index
+        if status in ("done", "error"):
+            st["ended_at"] = now
+        # mark the final stage completing as run finished
+        if status == "done" and index == len(kaggle_state["stages"]) - 1:
+            kaggle_state["running"] = False
+    return get_kaggle_state()
+
 
 _all_markets: List[Dict[str, Any]] = []
 _all_opportunities: List[Dict[str, Any]] = []
@@ -160,6 +232,22 @@ def set_cloud_results(results: List[Dict[str, Any]], clear: bool = True):
 
     logger.info(f"Cloud results synced! Top {TOP_K} prioritized. Total ops: {len(_all_opportunities)}")
 
+    # Verification stage. Two modes:
+    #   REMOTE_VERIFY on  -> park the 2000 for a second Kaggle GPU session
+    #                        (Ollama qwen3.6:27b, 3 workers) to pull over the
+    #                        tailnet, verify, and POST verdicts back.
+    #   REMOTE_VERIFY off -> legacy path: local Ollama (-cloud) verifies inline.
+    if REMOTE_VERIFY:
+        set_verification_queue(top_k)
+        scan_state["phase"] = "Awaiting remote verification"
+        scan_state["message"] = (
+            f"{len(top_k)} fuzzy matches parked for the Kaggle Ollama verifier "
+            f"({REMOTE_VERIFY_MODEL}, {REMOTE_VERIFY_WORKERS} workers).")
+        _broadcast_state()
+        if REMOTE_VERIFY_AUTOLAUNCH:
+            _launch_remote_verifier_bg()
+        return
+
     # Kick off LLM verification + report generation in the background so the
     # caller (the /ws cloud_results handler) can ack Colab without blocking.
     try:
@@ -192,26 +280,7 @@ async def _verify_and_report(matches: List[Dict[str, Any]]):
         # (is_exact_match true and confidence >= threshold)
         confirmed = await run_llm_verification(matches)
 
-        scan_state["phase"] = "Generating report"
-        scan_state["message"] = f"Confirmed {len(confirmed)} exact matches -- writing report..."
-        _broadcast_state()
-
-        reports_dir = Path("/app/reports")
-        reports_dir.mkdir(parents=True, exist_ok=True)
-        ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        out_path = reports_dir / f"arbitrage_report_{ts}.html"
-        generate_html_report(confirmed, str(out_path))
-
-        _llm_verified_matches = confirmed
-        _latest_report_path = str(out_path)
-
-        scan_state["phase"] = "Report ready"
-        scan_state["message"] = f"{len(confirmed)} confirmed matches. Report: {out_path.name}"
-        scan_state["confirmed_matches"] = len(confirmed)
-        scan_state["latest_report"] = out_path.name
-        _broadcast_state()
-
-        logger.info(f"Pipeline complete: {len(confirmed)} confirmed matches -> {out_path}")
+        await _generate_and_store_report(confirmed)
     except Exception as e:
         logger.error(f"LLM verification / report generation failed: {e}", exc_info=True)
         scan_state["phase"] = "Report failed"
@@ -231,6 +300,117 @@ def get_llm_verified_matches() -> List[Dict[str, Any]]:
 
 def get_latest_report_path() -> Optional[str]:
     return _latest_report_path
+
+
+# ── Remote verification (Session 2: Kaggle Ollama qwen3.6:27b, 3 workers) ─────
+# When REMOTE_VERIFY is on, the 2000 fuzzy matches are parked here instead of
+# being verified by local Ollama. A second Kaggle GPU session joins the tailnet,
+# pulls /api/verification-queue, runs qwen3.6:27b sharded across both T4s, and
+# POSTs verdicts to /api/verification-results, which calls apply_remote_verdicts.
+REMOTE_VERIFY            = os.environ.get("REMOTE_VERIFY", "0").lower() in ("1", "true", "yes")
+REMOTE_VERIFY_AUTOLAUNCH = os.environ.get("REMOTE_VERIFY_AUTOLAUNCH", "1").lower() in ("1", "true", "yes")
+REMOTE_VERIFY_MODEL      = os.environ.get("REMOTE_VERIFY_MODEL", "qwen3.6:27b")
+REMOTE_VERIFY_WORKERS    = int(os.environ.get("REMOTE_VERIFY_WORKERS", "3"))
+REMOTE_VERIFY_MIN_CONF   = int(os.environ.get("LLM_VERIFY_MIN_CONF", "85"))
+
+_verification_queue: List[Dict[str, Any]] = []
+_verification_meta: Dict[str, Any] = {"received": 0, "total": 0, "confirmed": 0, "started_at": None}
+
+
+def set_verification_queue(matches: List[Dict[str, Any]]):
+    """Park the fuzzy matches for the remote Kaggle verifier to pull. Each pair
+    gets a stable pairId so verdicts can be merged back by id."""
+    global _verification_queue, _verification_meta
+    for i, m in enumerate(matches):
+        m["pairId"] = i
+    _verification_queue = matches
+    _verification_meta = {
+        "received": 0, "total": len(matches), "confirmed": 0,
+        "started_at": datetime.now().isoformat(),
+    }
+    logger.info(f"Parked {len(matches)} matches for remote verification.")
+
+
+def get_verification_queue() -> List[Dict[str, Any]]:
+    return _verification_queue
+
+
+def get_verification_meta() -> Dict[str, Any]:
+    return {**_verification_meta, "queued": len(_verification_queue)}
+
+
+async def apply_remote_verdicts(verdicts: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Merge verdicts POSTed back by the Kaggle Ollama verifier onto the parked
+    matches, keep confirmed exact matches, and generate the HTML report.
+    Each verdict: {pairId, is_exact_match, confidence, reasoning, verifyModel}."""
+    global _verification_meta
+    by_id = {v.get("pairId"): v for v in verdicts if v.get("pairId") is not None}
+    if not by_id:
+        logger.warning("apply_remote_verdicts called with no usable verdicts -- skipping report.")
+        return {"merged": 0, "confirmed": 0}
+    merged = []
+    for m in _verification_queue:
+        v = by_id.get(m.get("pairId"))
+        if not v:
+            continue
+        merged.append({**m,
+                       "is_exact_match": bool(v.get("is_exact_match")),
+                       "confidence": int(v.get("confidence", 0)),
+                       "reasoning": str(v.get("reasoning", ""))[:200],
+                       "verifyModel": v.get("verifyModel", REMOTE_VERIFY_MODEL)})
+
+    confirmed = [m for m in merged
+                 if m.get("is_exact_match") and m.get("confidence", 0) >= REMOTE_VERIFY_MIN_CONF]
+    for m in confirmed:
+        end_a = m.get("marketA", {}).get("endDate") or "9999-12-31"
+        end_b = m.get("marketB", {}).get("endDate") or "9999-12-31"
+        m["earliestEndDate"] = min(end_a, end_b)
+    confirmed.sort(key=lambda x: (x["earliestEndDate"], -x.get("roi", 0)))
+
+    _verification_meta["received"] = len(by_id)
+    _verification_meta["confirmed"] = len(confirmed)
+    logger.info(f"Remote verdicts: {len(by_id)} received, {len(confirmed)} confirmed exact matches.")
+    await _generate_and_store_report(confirmed)
+    return {"merged": len(merged), "confirmed": len(confirmed)}
+
+
+async def _generate_and_store_report(confirmed: List[Dict[str, Any]]):
+    """Shared report tail used by both the local and remote verification paths."""
+    global _llm_verified_matches, _latest_report_path
+    from backend.html_report_generator import generate_html_report
+    from pathlib import Path
+
+    scan_state["phase"] = "Generating report"
+    scan_state["message"] = f"Confirmed {len(confirmed)} exact matches -- writing report..."
+    _broadcast_state()
+
+    reports_dir = Path("/app/reports")
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    out_path = reports_dir / f"arbitrage_report_{ts}.html"
+    generate_html_report(confirmed, str(out_path))
+
+    _llm_verified_matches = confirmed
+    _latest_report_path = str(out_path)
+
+    scan_state["phase"] = "Report ready"
+    scan_state["message"] = f"{len(confirmed)} confirmed matches. Report: {out_path.name}"
+    scan_state["confirmed_matches"] = len(confirmed)
+    scan_state["latest_report"] = out_path.name
+    _broadcast_state()
+    logger.info(f"Pipeline complete: {len(confirmed)} confirmed matches -> {out_path}")
+
+
+def _launch_remote_verifier_bg():
+    """Fire-and-forget launch of the Kaggle Ollama verifier kernel (Session 2)."""
+    try:
+        import threading
+        from verifier_launcher import launch_verifier
+        threading.Thread(target=launch_verifier, daemon=True).start()
+        logger.info("Remote verifier launch dispatched (Session 2).")
+    except Exception as e:
+        logger.warning(f"Could not auto-launch remote verifier: {e} "
+                       "(matches are still queryable at /api/verification-queue).")
 
 
 async def refresh_top_leads(limit: int = 20):
@@ -352,6 +532,8 @@ async def _fetch_with_progress(name, fetch_coro_func, results_dict):
             
         results_dict[name] = result
         _fetch_status[name] = f"done ({len(result):,})"
+        # live "loaded" count so the UI fills in as each platform finishes
+        scan_state["platform_counts"][name.lower()] = len(result)
         logger.info(f"{name}: fetched {len(result)} markets")
     except Exception as e:
         logger.error(f"{name} fetch error: {e}")
@@ -406,6 +588,7 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
     scan_state["total_comparisons"] = 0
     scan_state["completed_comparisons"] = 0
     scan_state["pairs_found"] = 0
+    scan_state["platform_counts"] = {"polymarket": 0, "predictit": 0, "ibkr": 0}
     _fetch_status.clear()
     _broadcast_state()  # Broadcast to WebSocket clients
 
@@ -573,41 +756,78 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
             scan_state["ibkr_scan_rounds_done"] = 1
             logger.info(f"IBKR round 1 complete: {len(ibkr_r1)} markets")
 
-            scan_state["phase"] = "IBKR round 2"
-            scan_state["message"] = f"IBKR round 1 done ({len(ibkr_r1):,} markets). Starting round 2 (full TWS depth)..."
-            scan_state["progress"] = 50
-            _broadcast_state()
+            # Round 2 is a warm TWS RE-pass — its only value is if it INCREASES
+            # the market count. IBKR_ROUND2 = on | off | auto (default auto):
+            #   auto  -> skip when the previous scan's round 2 added < MIN_NEW markets
+            #   off   -> never run round 2 ;  on -> always run it
+            _r2_mode    = os.environ.get("IBKR_ROUND2", "auto").lower()
+            _r2_marker  = "/app/data/ibkr_round2_marker.json"
+            _r2_min_new = int(os.environ.get("IBKR_ROUND2_MIN_NEW", "25"))
+            _skip_r2 = (_r2_mode == "off")
+            if _r2_mode == "auto":
+                try:
+                    with open(_r2_marker) as _f:
+                        _last_new = json.load(_f).get("last_new")
+                    _skip_r2 = isinstance(_last_new, int) and _last_new < _r2_min_new
+                except Exception:
+                    _skip_r2 = False  # no marker yet -> run once to measure
 
-            # Brief pause so TWS can propagate more bid/ask ticks before round 2
-            await asyncio.sleep(90)
+            if _skip_r2:
+                results["IBKR"] = ibkr_r1
+                scan_state["platform_counts"]["ibkr"] = len(ibkr_r1)
+                scan_state["ibkr_scan_rounds_done"] = 2
+                scan_state["phase"] = "IBKR round 2 skipped"
+                scan_state["message"] = (f"IBKR round 2 skipped (added <{_r2_min_new} markets last "
+                                         f"scan). {len(ibkr_r1):,} markets stand. Set IBKR_ROUND2=on to force.")
+                scan_state["progress"] = 55
+                _broadcast_state()
+                logger.info(f"IBKR round 2 skipped (IBKR_ROUND2={_r2_mode}); round 1's {len(ibkr_r1)} markets stand.")
+            else:
+                scan_state["phase"] = "IBKR round 2"
+                scan_state["message"] = f"IBKR round 1 done ({len(ibkr_r1):,} markets). Starting round 2 (full TWS depth)..."
+                scan_state["progress"] = 50
+                _broadcast_state()
 
-            results_r2: dict = {}
-            ibkr_func_r2 = platform_map["ibkr"][1]
+                # Brief pause so TWS can propagate more bid/ask ticks before round 2
+                await asyncio.sleep(90)
 
-            # Mirror round-2 progress into the frontend message — without this
-            # the UI freezes on "Starting round 2..." for the whole ~17 min
-            # streaming pass and looks stalled.
-            async def _mirror_r2_progress():
-                while True:
-                    st = _fetch_status.get("IBKR_R2", "starting...")
-                    scan_state["message"] = f"IBKR round 2/2 (warm TWS pass): {st}"
-                    _broadcast_state()
-                    if st.startswith("done") or st == "error":
-                        break
-                    await asyncio.sleep(3)
+                results_r2: dict = {}
+                ibkr_func_r2 = platform_map["ibkr"][1]
 
-            _mirror_task = asyncio.create_task(_mirror_r2_progress())
-            await _fetch_with_progress("IBKR_R2", ibkr_func_r2, results_r2)
-            _mirror_task.cancel()
-            ibkr_r2 = results_r2.get("IBKR_R2", [])
+                # Mirror round-2 progress into the frontend message — without this
+                # the UI freezes on "Starting round 2..." for the whole ~17 min
+                # streaming pass and looks stalled.
+                async def _mirror_r2_progress():
+                    while True:
+                        st = _fetch_status.get("IBKR_R2", "starting...")
+                        scan_state["message"] = f"IBKR round 2/2 (warm TWS pass): {st}"
+                        _broadcast_state()
+                        if st.startswith("done") or st == "error":
+                            break
+                        await asyncio.sleep(3)
 
-            # Merge: round-2 is authoritative; add any extras from round-1
-            ibkr_r2_ids = {m["id"] for m in ibkr_r2}
-            ibkr_extra  = [m for m in ibkr_r1 if m["id"] not in ibkr_r2_ids]
-            results["IBKR"] = ibkr_r2 + ibkr_extra
+                _mirror_task = asyncio.create_task(_mirror_r2_progress())
+                await _fetch_with_progress("IBKR_R2", ibkr_func_r2, results_r2)
+                _mirror_task.cancel()
+                ibkr_r2 = results_r2.get("IBKR_R2", [])
 
-            scan_state["ibkr_scan_rounds_done"] = 2
-            logger.info(f"IBKR round 2 complete: {len(ibkr_r2)} markets (merged total: {len(results['IBKR'])})")
+                # Merge: round-2 is authoritative; add any extras from round-1
+                ibkr_r2_ids = {m["id"] for m in ibkr_r2}
+                ibkr_extra  = [m for m in ibkr_r1 if m["id"] not in ibkr_r2_ids]
+                results["IBKR"] = ibkr_r2 + ibkr_extra
+                scan_state["platform_counts"]["ibkr"] = len(results["IBKR"])
+
+                scan_state["ibkr_scan_rounds_done"] = 2
+                _r2_new = len(results["IBKR"]) - len(ibkr_r1)   # net market-count gain
+                logger.info(f"IBKR round 2 complete: {len(ibkr_r2)} markets "
+                            f"(merged total: {len(results['IBKR'])}, net new vs round 1: {_r2_new})")
+                try:
+                    os.makedirs("/app/data", exist_ok=True)
+                    with open(_r2_marker, "w") as _f:
+                        json.dump({"last_new": _r2_new, "round1": len(ibkr_r1),
+                                   "round2": len(ibkr_r2), "merged": len(results["IBKR"])}, _f)
+                except Exception as _e:
+                    logger.warning(f"Could not persist IBKR round2 marker: {_e}")
 
             # Rebuild the combined market list with fresh IBKR data
             poly_markets  = results.get("Polymarket", [])
@@ -649,8 +869,13 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
                         f"Kaggle notebook queued (pos {exec_data.get('queue_position','?')}). "
                         f"Notebook polling for scan completion before fetching markets."
                     )
-                    scan_state["kaggle_kernel"] = f"bamove6969/cloud-gpu-matcher-v4"
+                    _kaggle_user = os.environ.get("KAGGLE_USERNAME", "jessefleming")
+                    _kaggle_slug = os.environ.get("KAGGLE_KERNEL_SLUG", "cloud-gpu-matcher-v4-stable")
+                    _kernel = f"{_kaggle_user}/{_kaggle_slug}"
+                    scan_state["kaggle_kernel"] = _kernel
                     scan_state["executor_status"] = "queued"
+                    # fresh per-cell state for the live Kaggle tab
+                    reset_kaggle_state(_kernel)
                 else:
                     logger.warning(f"Kaggle executor HTTP {exec_resp.status_code}: {exec_resp.text[:200]}")
                     scan_state["message"] = "Kaggle executor unreachable — trigger manually at kaggle.com"

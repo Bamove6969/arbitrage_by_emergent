@@ -23,6 +23,10 @@ from typing import List, Dict, Any
 
 import httpx
 
+from backend.live_state import (
+    reset_llm_state, finish_llm_state, worker_start, worker_done,
+)
+
 logger = logging.getLogger(__name__)
 
 OLLAMA_URL   = os.environ.get("OLLAMA_URL", "http://localhost:11434")
@@ -114,7 +118,10 @@ async def _run_instance(instance_id: int, batch: List[Dict[str, Any]],
     async def one(client, m):
         nonlocal done
         async with sem:
+            worker_start(instance_id)
             r = await verify_match_with_llm(client, m, model)
+            is_exact = bool(r.get("is_exact_match")) and r.get("confidence", 0) >= MIN_CONFIDENCE
+            worker_done(instance_id, is_exact)
             done += 1
             if done % 100 == 0:
                 logger.info(f"[instance {instance_id}] {done}/{len(batch)} verified")
@@ -142,10 +149,20 @@ async def verify_matches_with_llm(matches: List[Dict[str, Any]],
     size = (len(matches) + num_instances - 1) // num_instances
     batches = [matches[i:i + size] for i in range(0, len(matches), size)]
 
-    results_nested = await asyncio.gather(*[
-        _run_instance(i, b, models[i % len(models)], workers_per_instance)
-        for i, b in enumerate(batches)
-    ])
+    # publish the live picture for the OLLAMA tab before we start crunching
+    reset_llm_state(
+        len(matches),
+        [(models[i % len(models)], len(b), workers_per_instance)
+         for i, b in enumerate(batches)],
+    )
+
+    try:
+        results_nested = await asyncio.gather(*[
+            _run_instance(i, b, models[i % len(models)], workers_per_instance)
+            for i, b in enumerate(batches)
+        ])
+    finally:
+        finish_llm_state()
     verified = [r for batch in results_nested for r in batch]
 
     exact_matches = [

@@ -242,11 +242,87 @@ h1{color:#7dd3fc;font-size:18px;margin-bottom:12px;letter-spacing:1px}
 .plat{background:#0f172a;border:1px solid #1e3a5f;border-radius:6px;padding:6px;text-align:center}
 .plat-name{font-size:10px;color:#64748b}
 .plat-count{font-size:16px;color:#7dd3fc;font-weight:bold}
+.tabs{display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid #1e3a5f}
+.tab{background:none;border:none;color:#64748b;font-family:inherit;font-size:13px;font-weight:bold;
+     padding:8px 16px;cursor:pointer;border-bottom:2px solid transparent;letter-spacing:.5px}
+.tab:hover{color:#94a3b8}
+.tab.active{color:#7dd3fc;border-bottom-color:#3b82f6}
+.tabpane{display:none}
+.tabpane.active{display:block}
+/* Kaggle stepper */
+#kaggle-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+#kaggle-kernel{color:#94a3b8;font-size:12px}
+#kaggle-kernel a{color:#7dd3fc;text-decoration:none}
+.steps{display:flex;flex-direction:column;gap:8px}
+.step{display:flex;align-items:flex-start;gap:10px;background:#111827;border:1px solid #1e3a5f;
+      border-radius:8px;padding:10px 12px;transition:border-color .3s}
+.step.running{border-color:#3b82f6;box-shadow:0 0 0 1px #3b82f6 inset}
+.step.done{border-color:#166534}
+.step.error{border-color:#991b1b}
+.step-icon{font-size:15px;width:20px;text-align:center;flex:none;margin-top:1px}
+.step.pending .step-icon{color:#475569}
+.step.running .step-icon{color:#7dd3fc}
+.step.done .step-icon{color:#4ade80}
+.step.error .step-icon{color:#f87171}
+.step-body{flex:1;min-width:0}
+.step-name{font-size:13px;color:#e2e8f0}
+.step.pending .step-name{color:#64748b}
+.step-msg{font-size:11px;color:#94a3b8;margin-top:2px;word-break:break-word}
+.step-time{font-size:10px;color:#475569;flex:none;margin-top:2px}
+.spin{display:inline-block;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+/* Kaggle tab: two-session layout (everything runs in Kaggle, no local Ollama) */
+.kaggle-intro{color:#94a3b8;font-size:12px;margin-bottom:12px;line-height:1.6}
+.kaggle-intro b{color:#7dd3fc}
+.t4-badge{display:inline-block;background:#0f172a;border:1px solid #1e3a5f;border-radius:4px;
+          padding:1px 7px;color:#a78bfa;font-size:10px;font-weight:bold;margin-left:6px;letter-spacing:.3px}
+#verifier-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+#verifier-kernel{color:#94a3b8;font-size:12px}
+#verifier-kernel a{color:#7dd3fc;text-decoration:none}
+.verifier-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:6px}
+.vs-cell{background:#0f172a;border:1px solid #1e3a5f;border-radius:6px;padding:8px;text-align:center}
+.vs-cell .n{font-size:20px;font-weight:bold;color:#7dd3fc;font-variant-numeric:tabular-nums}
+.vs-cell.green .n{color:#4ade80}
+.vs-cell .l{font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.4px;margin-top:2px}
+.verifier-hint{font-size:11px;color:#475569;margin-top:6px}
+/* Ollama verification */
+#ollama-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+#ollama-flow{color:#94a3b8;font-size:12px;margin-bottom:14px;line-height:1.6}
+#ollama-flow b{color:#7dd3fc}
+.split-pill{display:inline-block;background:#0f172a;border:1px solid #1e3a5f;border-radius:12px;
+            padding:1px 10px;color:#a78bfa;font-weight:bold}
+.lanes{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:760px){.lanes{grid-template-columns:1fr}}
+.lane{background:#111827;border:1px solid #1e3a5f;border-radius:10px;padding:14px}
+.lane.active{border-color:#3b82f6}
+.lane-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
+.lane-model{color:#7dd3fc;font-size:13px;font-weight:bold;word-break:break-all}
+.lane-inst{color:#475569;font-size:10px;text-transform:uppercase;letter-spacing:.5px}
+.countdown{font-size:34px;font-weight:bold;color:#f1f5f9;line-height:1.1}
+.countdown small{font-size:13px;color:#64748b;font-weight:normal}
+.lane-bar{background:#1e293b;border-radius:4px;height:7px;margin:8px 0}
+.lane-bar > div{background:linear-gradient(90deg,#3b82f6,#7dd3fc);height:7px;border-radius:4px;transition:width .4s}
+.workers{display:flex;gap:6px;margin:8px 0 4px}
+.wkr{flex:1;height:22px;border-radius:5px;background:#0f172a;border:1px solid #1e3a5f;
+     display:flex;align-items:center;justify-content:center;font-size:10px;color:#475569;transition:all .3s}
+.wkr.busy{background:#1e3a5f;border-color:#3b82f6;color:#7dd3fc;animation:pulse 1.1s ease-in-out infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(59,130,246,.5)}50%{box-shadow:0 0 0 4px rgba(59,130,246,0)}}
+.exact{margin-top:8px;font-size:12px;color:#64748b}
+.exact b{color:#4ade80;font-size:20px;font-variant-numeric:tabular-nums}
+#ollama-total{margin-top:14px;text-align:center;font-size:13px;color:#94a3b8}
+#ollama-total b{color:#4ade80;font-size:22px}
 </style>
 </head>
 <body>
 <h1>⚡ ARBITRAGE SCANNER — LIVE</h1>
 
+<div class="tabs">
+  <button class="tab active" data-pane="pane-scan">📡 SCAN</button>
+  <button class="tab" data-pane="pane-kaggle">🖥️ KAGGLE GPU</button>
+  <button class="tab" data-pane="pane-ollama">🧠 OLLAMA VERIFY</button>
+</div>
+
+<div id="pane-scan" class="tabpane active">
 <div class="grid">
 <div class="card">
   <div class="label">Status</div>
@@ -271,6 +347,58 @@ h1{color:#7dd3fc;font-size:18px;margin-bottom:12px;letter-spacing:1px}
   <div class="label">Log Stream</div>
   <div id="log-box"></div>
 </div>
+</div><!-- /pane-scan -->
+
+<div id="pane-kaggle" class="tabpane">
+  <div class="kaggle-intro">
+    Both stages run <b>inside Kaggle</b> on dual&nbsp;T4 GPUs — nothing is sent to a local Ollama.
+    <b>Session&nbsp;1</b> embeds &amp; matches every market; <b>Session&nbsp;2</b> verifies the matches
+    with qwen3.6:27b over the tailnet.
+  </div>
+
+  <!-- Session 1 · Matcher (cloud-gpu-matcher-v4-stable) -->
+  <div class="card" style="margin-bottom:10px">
+    <div id="kaggle-head">
+      <div>
+        <div class="label">Session 1 · Matcher <span class="t4-badge">Kaggle GPU T4×2</span></div>
+        <div id="kaggle-state-badge" class="badge idle">idle</div>
+      </div>
+      <div id="kaggle-kernel">—</div>
+    </div>
+    <div id="steps" class="steps"></div>
+  </div>
+
+  <!-- Session 2 · Verifier (ollama-verifier-v1) -->
+  <div class="card">
+    <div id="verifier-head">
+      <div>
+        <div class="label">Session 2 · Verifier <span class="t4-badge">Kaggle GPU T4×2</span></div>
+        <div id="verifier-state-badge" class="badge idle">idle</div>
+      </div>
+      <div id="verifier-kernel">—</div>
+    </div>
+    <div id="verifier-summary"><div style="color:#475569;font-size:12px">Waiting for Session 1 to park matches…</div></div>
+    <div class="verifier-hint">Live per-worker detail in the 🧠 OLLAMA VERIFY tab.</div>
+  </div>
+</div><!-- /pane-kaggle -->
+
+<div id="pane-ollama" class="tabpane">
+  <div class="card">
+    <div id="ollama-head">
+      <div>
+        <div class="label">LLM Verification · qwen3.6:27b on Kaggle dual-T4</div>
+        <div id="ollama-badge" class="badge idle">idle</div>
+      </div>
+    </div>
+    <div id="ollama-flow">
+      Pulled <b id="ol-received">0</b> matches from Session 1 →
+      verified <b id="ol-done">0</b> one-by-one on <b>qwen3.6:27b</b>
+      (dual-T4 sharded, <b id="ol-workers">3</b> workers) → strict 100%-meaning check.
+    </div>
+    <div class="lanes" id="ol-lanes"></div>
+    <div id="ollama-total">Exact meaning-matches confirmed: <b id="ol-total">0</b></div>
+  </div>
+</div><!-- /pane-ollama -->
 
 <script>
 const badgeClass = {scanning:'scanning',complete:'complete',idle:'idle',error:'error',
@@ -286,14 +414,49 @@ async function pollStatus() {
     document.getElementById('phase').textContent = s.phase || '—';
     document.getElementById('message').textContent = s.message || '';
     document.getElementById('progress-bar').style.width = (s.progress||0)+'%';
-    document.getElementById('ibkr-rounds').textContent =
-      'IBKR rounds: ' + (s.ibkr_scan_rounds_done||0) + ' / 2';
-    document.getElementById('total-markets').textContent =
-      (s.total_markets||0).toLocaleString();
+    // IBKR shown as two human-friendly rounds: Round 1 = REST discovery,
+    // Round 2 = TWS pricing. Keyed off the fetcher's progress message
+    // ("discovering X/Y" = REST, "... (TWS)" = TWS pricing).
+    // rd: 0 = round 1 running, 1 = round 2 running, 2 = both done.
+    // Each round runs two sub-steps: REST discovery then TWS pricing.
+    const rd = s.ibkr_scan_rounds_done || 0;
+    const msg = s.message || '';
+    const dm = msg.match(/discovering\\s+([\\d,]+)\\s*\\/\\s*([\\d,]+)\\s*(\\(TWS\\))?/i);
+    let rtxt;
+    // Number reflects the sub-step being performed: REST discovery = 1, TWS pricing = 2.
+    const isTws = dm ? !!dm[3] : null;
+    if (rd >= 2) {
+      rtxt = 'IBKR: REST + TWS complete ✓';
+    } else if (dm) {
+      const sub = isTws ? 'TWS pricing' : 'REST discovery';
+      rtxt = 'IBKR Round ' + (isTws ? 2 : 1) + ' / 2 · ' + sub + ' — ' + dm[1] + ' / ' + dm[2];
+    } else if (s.status === 'scanning') {
+      rtxt = rd === 1 ? 'IBKR Round 2 / 2 · TWS warming up…' : 'IBKR Round 1 / 2 · REST starting…';
+    } else {
+      rtxt = 'IBKR: idle';
+    }
+    document.getElementById('ibkr-rounds').textContent = rtxt;
+    // Markets Loaded: count up live per-platform during a scan (from
+    // platform_counts), fall back to committed market-stats when idle.
+    const pc = s.platform_counts || {};
+    if (s.status === 'scanning') {
+      window.__scanning = true;
+      const poly = pc.polymarket||0, pi = pc.predictit||0, ib = pc.ibkr||0;
+      document.getElementById('c-poly').textContent = poly.toLocaleString();
+      document.getElementById('c-pi').textContent   = pi.toLocaleString();
+      document.getElementById('c-ibkr').textContent = ib.toLocaleString();
+      document.getElementById('total-markets').textContent =
+        (s.total_markets || (poly+pi+ib)).toLocaleString();
+    } else {
+      window.__scanning = false;
+      document.getElementById('total-markets').textContent =
+        (s.total_markets||0).toLocaleString();
+    }
   } catch(e) {}
 }
 
 async function pollStats() {
+  if (window.__scanning) return;  // live counts handled by pollStatus during a scan
   try {
     const r = await fetch('/api/market-stats');
     const s = await r.json();
@@ -322,9 +485,149 @@ es.onmessage = e => {
   } catch(_) {}
 };
 
+// ── Tabs ──────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.tabpane').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    document.getElementById(t.dataset.pane).classList.add('active');
+  });
+});
+
+// ── Kaggle GPU tab ────────────────────────────────────
+const STEP_ICON = {pending:'○', running:'⟳', done:'✓', error:'✗'};
+function fmtElapsed(a, b) {
+  if (!a) return '';
+  const end = b ? new Date(b) : new Date();
+  const s = Math.max(0, Math.round((end - new Date(a)) / 1000));
+  return s < 60 ? s + 's' : Math.floor(s/60) + 'm ' + (s%60) + 's';
+}
+async function pollKaggle() {
+  try {
+    const r = await fetch('/api/kaggle-status');
+    const k = await r.json();
+    const badge = document.getElementById('kaggle-state-badge');
+    const anyErr = (k.stages||[]).some(s => s.status === 'error');
+    const allDone = (k.stages||[]).length && k.stages.every(s => s.status === 'done');
+    if (anyErr)      { badge.textContent = 'error';    badge.className = 'badge error'; }
+    else if (k.running) { badge.textContent = 'running'; badge.className = 'badge scanning'; }
+    else if (allDone){ badge.textContent = 'complete'; badge.className = 'badge complete'; }
+    else             { badge.textContent = 'waiting';  badge.className = 'badge waiting'; }
+
+    const kd = document.getElementById('kaggle-kernel');
+    if (k.kernel) {
+      kd.innerHTML = 'kernel: <a href="https://www.kaggle.com/code/' + k.kernel +
+                     '" target="_blank">' + k.kernel + '</a>';
+    } else { kd.textContent = 'no kernel queued yet'; }
+
+    const box = document.getElementById('steps');
+    box.innerHTML = '';
+    (k.stages||[]).forEach(s => {
+      const div = document.createElement('div');
+      div.className = 'step ' + s.status;
+      const icon = STEP_ICON[s.status] || '○';
+      const spin = s.status === 'running' ? ' spin' : '';
+      div.innerHTML =
+        '<div class="step-icon"><span class="' + spin.trim() + '">' + icon + '</span></div>' +
+        '<div class="step-body"><div class="step-name">' + (s.index+1) + '. ' +
+          s.name + '</div>' +
+          (s.message ? '<div class="step-msg">' + s.message + '</div>' : '') +
+        '</div>' +
+        '<div class="step-time">' + fmtElapsed(s.started_at, s.ended_at) + '</div>';
+      box.appendChild(div);
+    });
+  } catch(e) {}
+}
+
+// ── Ollama verification tab ───────────────────────────
+async function pollOllama() {
+  try {
+    const r = await fetch('/api/llm-status');
+    const k = await r.json();
+    const badge = document.getElementById('ollama-badge');
+    if (k.running)          { badge.textContent = 'verifying'; badge.className = 'badge scanning'; }
+    else if (k.finished_at) { badge.textContent = 'complete';  badge.className = 'badge complete'; }
+    else                    { badge.textContent = 'waiting';   badge.className = 'badge waiting'; }
+
+    const insts = k.instances || [];
+    const olDone = insts.reduce((a, i) => a + (i.done||0), 0);
+    document.getElementById('ol-received').textContent = (k.received||0).toLocaleString();
+    document.getElementById('ol-done').textContent = olDone.toLocaleString();
+    document.getElementById('ol-workers').textContent =
+      insts.length ? (insts[0].workers||3) : 3;
+    document.getElementById('ol-total').textContent = (k.total_exact||0).toLocaleString();
+
+    const lanes = document.getElementById('ol-lanes');
+    if (!insts.length) {
+      lanes.innerHTML = '<div style="color:#475569;font-size:12px;grid-column:1/-1">' +
+        'Waiting for Kaggle to return fuzzy matches…</div>';
+      return;
+    }
+    lanes.innerHTML = '';
+    insts.forEach(inst => {
+      const pct = inst.total ? Math.round(100 * inst.done / inst.total) : 0;
+      let wk = '';
+      for (let i = 0; i < inst.workers; i++) {
+        const busy = i < inst.active;
+        wk += '<div class="wkr' + (busy ? ' busy' : '') + '">' +
+              (busy ? '⟳' : '·') + '</div>';
+      }
+      const div = document.createElement('div');
+      div.className = 'lane' + (inst.active > 0 ? ' active' : '');
+      div.innerHTML =
+        '<div class="lane-top"><span class="lane-model">' + inst.model + '</span>' +
+          '<span class="lane-inst">dual-T4 sharded</span></div>' +
+        '<div class="countdown">' + (inst.remaining||0).toLocaleString() +
+          ' <small>/ ' + (inst.total||0).toLocaleString() + ' left</small></div>' +
+        '<div class="lane-bar"><div style="width:' + pct + '%"></div></div>' +
+        '<div class="workers">' + wk + '</div>' +
+        '<div class="exact">exact meaning-matches: <b>' + (inst.exact||0).toLocaleString() + '</b></div>';
+      lanes.appendChild(div);
+    });
+  } catch(e) {}
+}
+
+// ── Kaggle tab · Session 2 (verifier) rollup ──────────
+// Mirrors /api/llm-status into the Kaggle tab so the second Kaggle notebook
+// (qwen3.6:27b on dual T4) shows alongside the matcher. Full per-worker lanes
+// remain in the OLLAMA VERIFY tab.
+async function pollVerifier() {
+  try {
+    const r = await fetch('/api/llm-status');
+    const k = await r.json();
+    const badge = document.getElementById('verifier-state-badge');
+    if (k.running)          { badge.textContent = 'verifying'; badge.className = 'badge scanning'; }
+    else if (k.finished_at) { badge.textContent = 'complete';  badge.className = 'badge complete'; }
+    else                    { badge.textContent = 'waiting';   badge.className = 'badge waiting'; }
+
+    document.getElementById('verifier-kernel').innerHTML =
+      'kernel: <a href="https://www.kaggle.com/code/jessefleming/ollama-verifier-v1" target="_blank">jessefleming/ollama-verifier-v1</a>';
+
+    const insts = k.instances || [];
+    const received = k.received || 0;
+    const done = insts.reduce((a, i) => a + (i.done || 0), 0);
+    const exact = k.total_exact || 0;
+    const sum = document.getElementById('verifier-summary');
+    if (!received) {
+      sum.className = '';
+      sum.innerHTML = '<div style="color:#475569;font-size:12px">Waiting for Session 1 to park matches…</div>';
+    } else {
+      sum.className = 'verifier-summary';
+      sum.innerHTML =
+        '<div class="vs-cell"><div class="n">' + received.toLocaleString() + '</div><div class="l">Received</div></div>' +
+        '<div class="vs-cell"><div class="n">' + done.toLocaleString() + '</div><div class="l">Verified</div></div>' +
+        '<div class="vs-cell green"><div class="n">' + exact.toLocaleString() + '</div><div class="l">Exact ✓</div></div>';
+    }
+  } catch(e) {}
+}
+
 setInterval(pollStatus, 2000);
 setInterval(pollStats,  5000);
-pollStatus(); pollStats();
+setInterval(pollKaggle, 2000);
+setInterval(pollOllama, 1500);
+setInterval(pollVerifier, 1500);
+pollStatus(); pollStats(); pollKaggle(); pollOllama(); pollVerifier();
 </script>
 </body>
 </html>"""
@@ -435,8 +738,113 @@ async def receive_cloud_results(results: List[Dict[str, Any]], clear: bool = Que
     # gemma4:31b-cloud, 2 instances x 2 workers, 2000 split into 2x1000,
     # then the HTML report is written to /app/reports/.
     set_cloud_results(results, clear=clear)
-    
+
     return {"status": "success", "imported": len(results), "llm_verifying": True}
+
+
+@app.get("/api/verification-queue")
+async def verification_queue():
+    """Pulled by the Kaggle Ollama verifier (Session 2) over the tailnet.
+    Returns the parked fuzzy matches plus the model/worker config to use."""
+    from backend.scanner import (
+        get_verification_queue, get_verification_meta,
+        REMOTE_VERIFY_MODEL, REMOTE_VERIFY_WORKERS, REMOTE_VERIFY_MIN_CONF,
+    )
+    q = get_verification_queue()
+    pairs = [{
+        "pairId": m.get("pairId"),
+        "a": (m.get("marketA", {}) or {}).get("title", ""),
+        "b": (m.get("marketB", {}) or {}).get("title", ""),
+        "inverted": bool(m.get("inverted", False)),
+    } for m in q]
+    return {
+        "count": len(pairs),
+        "model": REMOTE_VERIFY_MODEL,
+        "workers": REMOTE_VERIFY_WORKERS,
+        "min_confidence": REMOTE_VERIFY_MIN_CONF,
+        "meta": get_verification_meta(),
+        "pairs": pairs,
+    }
+
+
+@app.post("/api/verification-results")
+async def verification_results(request: Request):
+    """Verdicts POSTed back by the Kaggle Ollama verifier (Session 2).
+    Body: {"verdicts": [{pairId, is_exact_match, confidence, reasoning, verifyModel}]}.
+    Merges them onto the parked matches, keeps confirmed exact matches, and
+    generates the HTML report."""
+    from backend.scanner import apply_remote_verdicts
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    verdicts = body.get("verdicts", []) if isinstance(body, dict) else (body or [])
+    summary = await apply_remote_verdicts(verdicts)
+    return {"status": "success", **summary}
+
+
+@app.post("/api/verification-progress")
+async def verification_progress(request: Request):
+    """Live heartbeat from the Kaggle verifier (Session 2) so the OLLAMA VERIFY tab
+    shows the one-by-one progress as it happens (verdicts themselves only arrive in
+    one batch at the end, via /api/verification-results). Best-effort — the notebook
+    wraps this in try/except so it can never break the GPU run.
+    Body: {received, done, exact, model, workers}."""
+    from backend.live_state import set_verification_progress
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        set_verification_progress(
+            received=int(body.get("received", 0)),
+            done=int(body.get("done", 0)),
+            exact=int(body.get("exact", 0)),
+            model=str(body.get("model", "qwen3.6:27b")),
+            workers=int(body.get("workers", 3)),
+        )
+    except Exception as e:
+        logger.warning(f"verification-progress update failed: {e}")
+    return {"status": "ok"}
+
+
+@app.post("/api/kaggle-progress")
+async def kaggle_progress(request: Request):
+    """Beacon endpoint hit by the Cloud GPU notebook once per cell/stage.
+
+    Body: {"stage": int, "status": "running|done|error", "message": str}
+    Best-effort — the notebook wraps these calls in try/except so a failure
+    here can never break a GPU run.
+    """
+    from backend.scanner import update_kaggle_stage
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        stage = int(body.get("stage", -1))
+    except (TypeError, ValueError):
+        stage = -1
+    status = str(body.get("status", "running"))
+    message = str(body.get("message", ""))
+    state = update_kaggle_stage(stage, status, message)
+    return {"status": "ok", "current_stage": state.get("current_stage")}
+
+
+@app.get("/api/kaggle-status")
+async def kaggle_status():
+    """Live per-cell state of the Cloud GPU notebook for the /live Kaggle tab."""
+    from backend.scanner import get_kaggle_state
+    return get_kaggle_state()
+
+
+@app.get("/api/llm-status")
+async def llm_status():
+    """Live state of the Ollama LLM verification stage for the /live OLLAMA tab.
+    Shows the 2000 fuzzy matches split across instances, each model's countdown,
+    active workers, and the running exact-match tally."""
+    from backend.live_state import get_llm_state
+    return get_llm_state()
 
 
 @app.get("/api/scanner-config")

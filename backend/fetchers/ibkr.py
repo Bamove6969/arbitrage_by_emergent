@@ -209,8 +209,20 @@ async def fetch_ibkr_markets(on_progress: callable = None) -> List[Dict[str, Any
                     batch_tickers.append(ticker)
                     await asyncio.sleep(0.025)  # ~40 req/sec, under the pacing limit
 
-                # Give TWS time to push back the first wave of bid/ask/last data.
-                await asyncio.sleep(4.0)
+                # Adaptive wait: poll until most tickers have data, then move on —
+                # instead of a blind fixed wait. This adds NO message traffic (just
+                # reads already-pushed ticks), so it can't violate pacing limits; it
+                # only removes idle waiting. Most ForecastEx quotes arrive <1s.
+                def _has_data(t):
+                    return ((t.bid and t.bid > 0) or (t.ask and t.ask > 0)
+                            or (t.last and t.last > 0))
+                _min_wait, _max_wait, _step = 0.6, 4.0, 0.25
+                _waited_b = 0.0
+                await asyncio.sleep(_min_wait); _waited_b += _min_wait
+                while _waited_b < _max_wait:
+                    if sum(1 for t in batch_tickers if _has_data(t)) >= 0.9 * len(batch_tickers):
+                        break  # 90% populated — stragglers aren't worth the wait
+                    await asyncio.sleep(_step); _waited_b += _step
 
                 tickers.extend(batch_tickers)
 

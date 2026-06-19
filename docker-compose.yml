@@ -44,6 +44,26 @@ services:
       - OLLAMA_MODELS=${OLLAMA_MODELS:-}
       - OLLAMA_NUM_PARALLEL=2
       - OLLAMA_MAX_LOADED_MODELS=2
+      # ----- Remote verification (Session 2: Kaggle Ollama qwen3.6:27b) -----
+      # REMOTE_VERIFY on  -> park the 2000 matches for the Kaggle verifier to pull
+      #                      over the tailnet (set REMOTE_VERIFY=0 to revert to
+      #                      inline local-Ollama verification).
+      # AUTOLAUNCH off by default -> matches park, but you fire Session 2 deliberately
+      #                      with `python verifier_launcher.py` (set =1 to auto-push).
+      # IBKR round 2 (warm TWS re-pass, ~17 min): on | off | auto (default auto =
+      # skip when the prior scan's round 2 added < IBKR_ROUND2_MIN_NEW markets).
+      - IBKR_ROUND2=${IBKR_ROUND2:-auto}
+      - IBKR_ROUND2_MIN_NEW=${IBKR_ROUND2_MIN_NEW:-25}
+      - REMOTE_VERIFY=${REMOTE_VERIFY:-1}
+      - REMOTE_VERIFY_AUTOLAUNCH=${REMOTE_VERIFY_AUTOLAUNCH:-0}
+      - REMOTE_VERIFY_MODEL=${REMOTE_VERIFY_MODEL:-qwen3.6:27b}
+      - REMOTE_VERIFY_WORKERS=${REMOTE_VERIFY_WORKERS:-3}
+      - REMOTE_VERIFY_KERNEL_SLUG=${REMOTE_VERIFY_KERNEL_SLUG:-ollama-verifier-v1}
+      # ----- Tailscale (verifier tailnet join) -----
+      # Injected into the verifier notebook at push time so it survives Kaggle
+      # kernel delete/recreate (no per-kernel Kaggle Secret needed).
+      - TS_AUTHKEY=${TS_AUTHKEY:-}
+      - BACKEND_URL=${BACKEND_URL:-http://100.92.171.13:8000}
       # ----- ngrok -----
       - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
       # No default domain: the reserved free-tier domain belongs to the LLM
@@ -54,6 +74,9 @@ services:
       - KAGGLE_USERNAME=${KAGGLE_USERNAME:-jessefleming}
       - KAGGLE_API_TOKEN=${KAGGLE_API_TOKEN}
       - KAGGLE_KERNEL_SLUG=${KAGGLE_KERNEL_SLUG:-cloud-gpu-matcher-v4-stable}
+      # Executor provider: kaggle | colab | auto (auto = Kaggle, fall back to Colab on quota)
+      - EXECUTOR_PROVIDER=${EXECUTOR_PROVIDER:-auto}
+      - COLAB_GIST_OWNER=${COLAB_GIST_OWNER:-}
       - HF_TOKEN=${HF_TOKEN}
     volumes:
       - ./data:/home/ibg_settings
@@ -62,6 +85,8 @@ services:
       - ./logs:/app/logs
       - ./Cloud_GPU_Matcher_v4_Stable.ipynb:/app/Cloud_GPU_Matcher_v4_Stable.ipynb
       - ./Cloud_GPU_Matcher_v3_Auto.ipynb:/app/Cloud_GPU_Matcher_v3_Auto.ipynb
+      - ./Ollama_Verifier_v1.ipynb:/app/Ollama_Verifier_v1.ipynb
+      - ./verifier_launcher.py:/app/verifier_launcher.py
       - ./data:/app/data
       - ollama-models:/root/.ollama
 
