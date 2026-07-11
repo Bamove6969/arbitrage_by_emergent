@@ -9,8 +9,22 @@ from concurrent.futures import ThreadPoolExecutor
 from backend.database import get_db
 from backend.fetchers.polymarket import fetch_polymarket_markets
 from backend.fetchers.predictit import fetch_predictit_markets
-from backend.fetchers.ibkr import fetch_ibkr_markets
+from backend.fetchers.kalshi import fetch_kalshi_markets
+
+try:
+    from backend.fetchers.ibkr_public import fetch_ibkr_combined
+    HAS_IBKR = True
+except Exception:
+    HAS_IBKR = False
+
+    async def fetch_ibkr_combined(*args, **kwargs):
+        return []
+
 from backend.matcher import find_arbitrage_pairs, compute_pair_arb
+
+IBKR_MODE = os.environ.get("IBKR_MODE", "auto").lower()
+POLY_LIMIT = int(os.environ.get("SCAN_POLYMARKET_LIMIT", "20000"))
+KALSHI_LIMIT = int(os.environ.get("SCAN_KALSHI_LIMIT", "10000"))
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +63,7 @@ scan_state = {
     "ibkr_scan_rounds_done": 0,  # tracks IBKR's 2-pass discovery (1=REST done, 2=TWS+REST round 2 done)
     # live per-platform "loaded" counts, filled as each fetcher finishes its pass
     # (so the UI can count up live instead of jumping at the end-of-scan merge)
-    "platform_counts": {"polymarket": 0, "predictit": 0, "ibkr": 0},
+    "platform_counts": {"kalshi": 0, "polymarket": 0, "predictit": 0, "ibkr": 0},
 }
 
 _scan_signal = asyncio.Event()
@@ -544,7 +558,7 @@ async def _fetch_with_progress(name, fetch_coro_func, results_dict):
 def _update_fetch_progress(total_expected: int):
     parts = []
     # Order them logically
-    for name in ["Polymarket", "PredictIt", "IBKR"]:
+    for name in ["Kalshi", "Polymarket", "PredictIt", "IBKR"]:
         status = _fetch_status.get(name, "waiting")
         parts.append(f"{name}: {status}")
     
@@ -588,14 +602,14 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
     scan_state["total_comparisons"] = 0
     scan_state["completed_comparisons"] = 0
     scan_state["pairs_found"] = 0
-    scan_state["platform_counts"] = {"polymarket": 0, "predictit": 0, "ibkr": 0}
+    scan_state["platform_counts"] = {"kalshi": 0, "polymarket": 0, "predictit": 0, "ibkr": 0}
     _fetch_status.clear()
     _broadcast_state()  # Broadcast to WebSocket clients
 
     try:
         scan_state["progress"] = 3
         scan_state["phase"] = "Fetching all platforms"
-        scan_state["message"] = "Fetching Polymarket, PredictIt & IBKR in parallel..."
+        scan_state["message"] = "Fetching Kalshi, Polymarket & PredictIt in parallel..."
 
         results: Dict[str, List] = {}
         fetch_tasks = []
@@ -603,12 +617,16 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
         # Store as lambda to defer execution (and check signature)
         # Note: Manifold removed - it's play-money only, not real funds
         platform_map = {
-            "polymarket": ("Polymarket", lambda on_progress=None: fetch_polymarket_markets(on_progress=on_progress)),
+            "kalshi": ("Kalshi", lambda on_progress=None: fetch_kalshi_markets(limit=KALSHI_LIMIT, on_progress=on_progress)),
+            "polymarket": ("Polymarket", lambda on_progress=None: fetch_polymarket_markets(limit=POLY_LIMIT, on_progress=on_progress)),
             "predictit": ("PredictIt", lambda: fetch_predictit_markets()), # PredictIt doesn't have progress yet
-            "ibkr": ("IBKR", lambda on_progress=None: fetch_ibkr_markets(on_progress=on_progress)),
+            "ibkr": ("IBKR", lambda on_progress=None: fetch_ibkr_combined(on_progress=on_progress)),
         }
 
-        active_platforms = platforms if platforms else ["polymarket", "predictit", "ibkr"]
+        default_platforms = ["kalshi", "polymarket", "predictit"]
+        if IBKR_MODE != "off" and HAS_IBKR:
+            default_platforms.append("ibkr")
+        active_platforms = platforms if platforms else default_platforms
         active_platforms = [p.lower() for p in active_platforms]
         
         for p_id, (name, coro_func) in platform_map.items():
@@ -621,7 +639,11 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
                     if p_id in ap or ap in p_id:
                         is_active = True
                         break
-            
+
+            # IBKR: honour IBKR_MODE=off
+            if p_id == "ibkr" and (IBKR_MODE == "off" or not HAS_IBKR):
+                is_active = False
+
             if is_active:
                 fetch_tasks.append(_fetch_with_progress(name, coro_func, results))
             else:
@@ -639,57 +661,25 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
         )
 
 # Manifold removed - play-money only
+        kalshi_markets = results.get("Kalshi", [])
         poly_markets = results.get("Polymarket", [])
         pi_markets = results.get("PredictIt", [])
         ibkr_markets = results.get("IBKR", [])
 
-        # If TWS connection failed, fall back to cached IBKR markets from DB
-        if not ibkr_markets:
-            logger.warning("IBKR live fetch returned 0 — loading cached markets from DB")
-            scan_state["message"] = "IBKR TWS unavailable — loading cached IBKR markets from DB..."
-            try:
-                import aiosqlite
-                async with aiosqlite.connect("/app/backend/arbitrage.db") as db:
-                    db.row_factory = aiosqlite.Row
-                    async with db.execute("SELECT * FROM markets WHERE platform='IBKR' LIMIT 5000") as cur:
-                        rows = await cur.fetchall()
-                        ibkr_markets = [{
-                            "id": r["id"],
-                            "platform": r["platform"],
-                            "title": r["title"],
-                            "category": r["category"],
-                            "yesPrice": r["yes_price"],
-                            "noPrice": r["no_price"],
-                            "volume": r["volume"],
-                            "lastUpdated": r["last_updated"],
-                            "endDate": r["end_date"],
-                            "marketUrl": r["market_url"],
-                            "isBinary": bool(r["is_binary"]),
-                            "outcomeCount": r["outcome_count"],
-                            "contractLabel": r["contract_label"],
-                            "outcomes": None,
-                        } for r in rows]
-                if ibkr_markets:
-                    logger.info(f"Loaded {len(ibkr_markets)} cached IBKR markets from DB")
-                else:
-                    logger.warning("No cached IBKR markets in DB either")
-            except Exception as e:
-                logger.error(f"DB fallback for IBKR failed: {e}")
-
         fetch_warnings = []
+        if not kalshi_markets:
+            fetch_warnings.append("Kalshi returned 0 markets")
         if not poly_markets:
             fetch_warnings.append("Polymarket returned 0 markets")
         if not pi_markets:
             fetch_warnings.append("PredictIt returned 0 markets")
-        if not ibkr_markets:
-            fetch_warnings.append("IBKR returned 0 (no cache)")
         if fetch_warnings:
             logger.warning(f"Partial fetch: {'; '.join(fetch_warnings)}")
 
         scan_state["progress"] = 45
-        scan_state["message"] = f"Got {len(poly_markets)} Polymarket + {len(pi_markets)} PredictIt + {len(ibkr_markets)} IBKR. Saving to DB..."
+        scan_state["message"] = f"Got {len(kalshi_markets)} Kalshi + {len(poly_markets)} Polymarket + {len(pi_markets)} PredictIt. Saving to DB..."
 
-        all_markets = poly_markets + pi_markets + ibkr_markets
+        all_markets = kalshi_markets + poly_markets + pi_markets + ibkr_markets
         
         # Tag weather markets
         weather_keywords = [
@@ -732,161 +722,43 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
         finally:
             await db.close()
 
-        # -------------------------------------------------------
-        # LOCAL MATCHING IS DISABLED — Colab handles all matching.
-        # The local scan's job is only to:
-        #   1. Keep _all_markets fresh (so /api/raw-markets gives Colab current data)
-        #   2. Refresh prices on existing Colab results if any are present
-        # -------------------------------------------------------
-
-        if _all_opportunities:
-            # Kaggle results already present — refresh prices with fresh market data
-            scan_state["progress"] = 48
-            scan_state["phase"] = "Refreshing prices"
-            scan_state["message"] = f"Updating prices on {len(_all_opportunities)} Kaggle results..."
-            logger.info(f"Local scan refreshing prices on {len(_all_opportunities)} Kaggle results...")
-            await refresh_top_leads(limit=len(_all_opportunities))
-            scan_state["message"] = f"Prices refreshed. {len(_all_opportunities)} opportunities ready."
-        else:
-            # ── IBKR round 1 already ran in the gather above ──────────────────
-            # Round 1 typically returns ~1 000 markets (REST category tree pass).
-            # Round 2 (another full fetch a minute later) returns ~120 000 markets
-            # because TWS subscriptions have had time to propagate bid/ask data.
-            ibkr_r1 = results.get("IBKR", [])
-            scan_state["ibkr_scan_rounds_done"] = 1
-            logger.info(f"IBKR round 1 complete: {len(ibkr_r1)} markets")
-
-            # Round 2 is a warm TWS RE-pass — its only value is if it INCREASES
-            # the market count. IBKR_ROUND2 = on | off | auto (default auto):
-            #   auto  -> skip when the previous scan's round 2 added < MIN_NEW markets
-            #   off   -> never run round 2 ;  on -> always run it
-            _r2_mode    = os.environ.get("IBKR_ROUND2", "auto").lower()
-            _r2_marker  = "/app/data/ibkr_round2_marker.json"
-            _r2_min_new = int(os.environ.get("IBKR_ROUND2_MIN_NEW", "25"))
-            _skip_r2 = (_r2_mode == "off")
-            if _r2_mode == "auto":
-                try:
-                    with open(_r2_marker) as _f:
-                        _last_new = json.load(_f).get("last_new")
-                    _skip_r2 = isinstance(_last_new, int) and _last_new < _r2_min_new
-                except Exception:
-                    _skip_r2 = False  # no marker yet -> run once to measure
-
-            if _skip_r2:
-                results["IBKR"] = ibkr_r1
-                scan_state["platform_counts"]["ibkr"] = len(ibkr_r1)
-                scan_state["ibkr_scan_rounds_done"] = 2
-                scan_state["phase"] = "IBKR round 2 skipped"
-                scan_state["message"] = (f"IBKR round 2 skipped (added <{_r2_min_new} markets last "
-                                         f"scan). {len(ibkr_r1):,} markets stand. Set IBKR_ROUND2=on to force.")
-                scan_state["progress"] = 55
-                _broadcast_state()
-                logger.info(f"IBKR round 2 skipped (IBKR_ROUND2={_r2_mode}); round 1's {len(ibkr_r1)} markets stand.")
-            else:
-                scan_state["phase"] = "IBKR round 2"
-                scan_state["message"] = f"IBKR round 1 done ({len(ibkr_r1):,} markets). Starting round 2 (full TWS depth)..."
-                scan_state["progress"] = 50
-                _broadcast_state()
-
-                # Brief pause so TWS can propagate more bid/ask ticks before round 2
-                await asyncio.sleep(90)
-
-                results_r2: dict = {}
-                ibkr_func_r2 = platform_map["ibkr"][1]
-
-                # Mirror round-2 progress into the frontend message — without this
-                # the UI freezes on "Starting round 2..." for the whole ~17 min
-                # streaming pass and looks stalled.
-                async def _mirror_r2_progress():
-                    while True:
-                        st = _fetch_status.get("IBKR_R2", "starting...")
-                        scan_state["message"] = f"IBKR round 2/2 (warm TWS pass): {st}"
-                        _broadcast_state()
-                        if st.startswith("done") or st == "error":
-                            break
-                        await asyncio.sleep(3)
-
-                _mirror_task = asyncio.create_task(_mirror_r2_progress())
-                await _fetch_with_progress("IBKR_R2", ibkr_func_r2, results_r2)
-                _mirror_task.cancel()
-                ibkr_r2 = results_r2.get("IBKR_R2", [])
-
-                # Merge: round-2 is authoritative; add any extras from round-1
-                ibkr_r2_ids = {m["id"] for m in ibkr_r2}
-                ibkr_extra  = [m for m in ibkr_r1 if m["id"] not in ibkr_r2_ids]
-                results["IBKR"] = ibkr_r2 + ibkr_extra
-                scan_state["platform_counts"]["ibkr"] = len(results["IBKR"])
-
-                scan_state["ibkr_scan_rounds_done"] = 2
-                _r2_new = len(results["IBKR"]) - len(ibkr_r1)   # net market-count gain
-                logger.info(f"IBKR round 2 complete: {len(ibkr_r2)} markets "
-                            f"(merged total: {len(results['IBKR'])}, net new vs round 1: {_r2_new})")
-                try:
-                    os.makedirs("/app/data", exist_ok=True)
-                    with open(_r2_marker, "w") as _f:
-                        json.dump({"last_new": _r2_new, "round1": len(ibkr_r1),
-                                   "round2": len(ibkr_r2), "merged": len(results["IBKR"])}, _f)
-                except Exception as _e:
-                    logger.warning(f"Could not persist IBKR round2 marker: {_e}")
-
-            # Rebuild the combined market list with fresh IBKR data
-            poly_markets  = results.get("Polymarket", [])
-            pi_markets    = results.get("PredictIt",  [])
-            ibkr_markets  = results["IBKR"]
-            all_markets_merged = poly_markets + pi_markets + ibkr_markets
-
-            # Tag weather
-            for m in all_markets_merged:
-                title_lower = m.get("title", "").lower()
-                m["isWeather"] = 1 if any(kw in title_lower for kw in [
-                    "temperature","rain","snow","precipitation","weather","climate",
-                    "storm","hurricane","degree","high in","low in","forecast",
-                ]) else 0
-
-            _all_markets.clear()
-            _all_markets.extend(all_markets_merged)
-            scan_state["total_markets"] = len(_all_markets)
-
-            scan_state["phase"] = "Triggering Kaggle"
-            scan_state["message"] = f"Both IBKR scans done. Pushing notebook to Kaggle ({len(_all_markets):,} markets)..."
-            scan_state["progress"] = 55
-            _broadcast_state()
-
-            # ── Trigger Kaggle executor ────────────────────────────────────────
-            try:
-                import requests as _req
-                kaggle_executor_url = os.environ.get("ORACLE_EXECUTOR_URL", "http://localhost:5000")
-                logger.info(f"Triggering Kaggle executor at {kaggle_executor_url}")
-                exec_resp = _req.post(
-                    f"{kaggle_executor_url}/execute",
-                    json={},   # executor fetches ngrok URL itself
-                    timeout=15,
-                )
-                if exec_resp.status_code == 200:
-                    exec_data = exec_resp.json()
-                    logger.info(f"Kaggle executor queued: {exec_data}")
-                    scan_state["message"] = (
-                        f"Kaggle notebook queued (pos {exec_data.get('queue_position','?')}). "
-                        f"Notebook polling for scan completion before fetching markets."
-                    )
-                    _kaggle_user = os.environ.get("KAGGLE_USERNAME", "jessefleming")
-                    _kaggle_slug = os.environ.get("KAGGLE_KERNEL_SLUG", "cloud-gpu-matcher-v4-stable")
-                    _kernel = f"{_kaggle_user}/{_kaggle_slug}"
-                    scan_state["kaggle_kernel"] = _kernel
-                    scan_state["executor_status"] = "queued"
-                    # fresh per-cell state for the live Kaggle tab
-                    reset_kaggle_state(_kernel)
-                else:
-                    logger.warning(f"Kaggle executor HTTP {exec_resp.status_code}: {exec_resp.text[:200]}")
-                    scan_state["message"] = "Kaggle executor unreachable — trigger manually at kaggle.com"
-            except Exception as e:
-                logger.error(f"Kaggle executor trigger error: {e}")
-
+        # ── Local cross-platform matching (fee-aware ROI) ─────────────────
         scan_state["progress"] = 50
-        scan_state["phase"] = "Waiting for Cloud GPU"
-        # We explicitly DO NOT set "complete". The UI will hang the progress bar at 50%.
-        # The /api/cloud-results endpoint will set it to 100% and "complete" later.
-        scan_state["status"] = "waiting_for_cloud" 
+        scan_state["phase"] = "Matching markets"
+        scan_state["message"] = f"Matching {len(all_markets):,} markets across platforms..."
+        _broadcast_state()
+
+        loop = asyncio.get_event_loop()
+
+        def on_match_progress(completed, total, found):
+            def _apply():
+                scan_state["total_comparisons"] = total
+                scan_state["completed_comparisons"] = completed
+                scan_state["pairs_found"] = found
+                pct = 50 + int((completed / total) * 48) if total else 98
+                scan_state["progress"] = min(pct, 98)
+                scan_state["message"] = f"Compared {completed:,} / {total:,} candidate pairs — {found} matches so far"
+            loop.call_soon_threadsafe(_apply)
+
+        min_sim = float(os.environ.get("MATCH_MIN_SIMILARITY", "35"))
+        pairs = await loop.run_in_executor(
+            _matcher_pool,
+            lambda: find_arbitrage_pairs(all_markets, min_similarity=min_sim, on_progress=on_match_progress),
+        )
+        pairs = pairs or []
+
+        _all_opportunities.clear()
+        _all_opportunities.extend(pairs)
+        await save_opportunities_to_db(pairs)
+
+        scan_state["progress"] = 100
+        scan_state["phase"] = "complete"
+        scan_state["status"] = "complete"
+        scan_state["message"] = (
+            f"Scan complete — {len(pairs):,} matched pairs across {len(all_markets):,} markets "
+            f"({sum(1 for p in pairs if p.get('roi', 0) > 0):,} with positive ROI)"
+        )
+        scan_state["is_scanning"] = False
         scan_state["total_opportunities"] = len(_all_opportunities)
         scan_state["pairs_found"] = len(_all_opportunities)
         scan_state["last_scan_time"] = datetime.utcnow().isoformat()
@@ -894,11 +766,11 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
         _broadcast_state()  # Broadcast scan complete
 
         return {
-            "status": "waiting_for_cloud",
+            "status": "complete",
             "total_markets": len(all_markets),
             "total_opportunities": len(_all_opportunities),
             "markets_by_platform": {
-                # Manifold removed - play-money only
+                "Kalshi": len(kalshi_markets),
                 "Polymarket": len(poly_markets),
                 "PredictIt": len(pi_markets),
                 "IBKR": len(ibkr_markets),
@@ -948,3 +820,110 @@ async def auto_scan_loop():
         except asyncio.TimeoutError:
             # Timeout is fine, just means we hit the periodic mark
             pass
+
+
+# ── Persistence: survive backend restarts ────────────────────────────────────
+
+def _row_to_market(r) -> Dict[str, Any]:
+    outcomes = None
+    try:
+        if r["outcomes_json"]:
+            outcomes = json.loads(r["outcomes_json"])
+    except Exception:
+        pass
+    return {
+        "id": r["id"], "platform": r["platform"], "title": r["title"],
+        "category": r["category"], "yesPrice": r["yes_price"], "noPrice": r["no_price"],
+        "volume": r["volume"], "lastUpdated": r["last_updated"], "endDate": r["end_date"],
+        "marketUrl": r["market_url"], "isBinary": bool(r["is_binary"]),
+        "outcomeCount": r["outcome_count"], "contractLabel": r["contract_label"],
+        "outcomes": outcomes, "isWeather": r["is_weather"],
+    }
+
+
+async def save_opportunities_to_db(pairs: List[Dict[str, Any]]):
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM matched_pairs")
+        for p in pairs:
+            await db.execute(
+                """INSERT INTO matched_pairs
+                   (market_a_id, market_b_id, match_score, match_reason,
+                    combined_yes_cost, potential_profit, roi, combo_type,
+                    leg_count, legs_json, fees, earliest_resolution, scenario)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    p["marketA"]["id"], p["marketB"]["id"],
+                    p.get("matchScore", 0), p.get("matchReason", ""),
+                    p.get("combinedYesCost", 0), p.get("potentialProfit", 0),
+                    p.get("roi", 0), p.get("comboType", "pair"),
+                    p.get("legCount", 2), json.dumps(p.get("legs", [])),
+                    p.get("fees", 0), p.get("earliestResolution"),
+                    str(p.get("scenario", "")),
+                ),
+            )
+        await db.commit()
+        logger.info(f"Persisted {len(pairs)} matched pairs to DB")
+    except Exception as e:
+        logger.warning(f"Could not persist matched pairs: {e}")
+    finally:
+        await db.close()
+
+
+async def load_cached_from_db():
+    """Restore markets + opportunities from SQLite after a backend restart."""
+    global _all_markets, _all_opportunities
+    markets, opps = [], []
+    try:
+        db = await get_db()
+        try:
+            cur = await db.execute("SELECT * FROM markets")
+            rows = await cur.fetchall()
+            markets = [_row_to_market(r) for r in rows]
+            by_id = {m["id"]: m for m in markets}
+
+            cur = await db.execute("SELECT * FROM matched_pairs ORDER BY roi DESC")
+            prows = await cur.fetchall()
+            for r in prows:
+                ma, mb = by_id.get(r["market_a_id"]), by_id.get(r["market_b_id"])
+                if not ma or not mb:
+                    continue
+                legs = []
+                try:
+                    legs = json.loads(r["legs_json"]) if r["legs_json"] else []
+                except Exception:
+                    pass
+                opps.append({
+                    "comboType": r["combo_type"] or "pair",
+                    "legCount": r["leg_count"] or 2,
+                    "legs": legs,
+                    "marketA": ma, "marketB": mb,
+                    "combinedYesCost": r["combined_yes_cost"],
+                    "totalCost": r["combined_yes_cost"],
+                    "fees": r["fees"] or 0,
+                    "potentialProfit": r["potential_profit"],
+                    "roi": r["roi"],
+                    "matchScore": r["match_score"],
+                    "matchReason": r["match_reason"],
+                    "earliestResolution": r["earliest_resolution"],
+                    "scenario": r["scenario"],
+                })
+        finally:
+            await db.close()
+
+        if markets:
+            _all_markets.clear()
+            _all_markets.extend(markets)
+            scan_state["total_markets"] = len(markets)
+        if opps:
+            _all_opportunities.clear()
+            _all_opportunities.extend(opps)
+            scan_state["total_opportunities"] = len(opps)
+            scan_state["pairs_found"] = len(opps)
+            scan_state["status"] = "complete"
+            scan_state["phase"] = "complete"
+            scan_state["progress"] = 100
+            scan_state["message"] = f"Restored {len(opps):,} opportunities and {len(markets):,} markets from last scan"
+        logger.info(f"Restored {len(markets)} markets, {len(opps)} opportunities from DB")
+    except Exception as e:
+        logger.warning(f"DB cache restore failed: {e}")

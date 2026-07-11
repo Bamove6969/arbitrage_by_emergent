@@ -119,7 +119,10 @@ def compute_similarity_fast(keywords_a: set, keywords_b: set) -> float:
 
 def estimate_fee(platform: str, price: float) -> float:
     p = platform.lower()
-    if p == "manifold":
+    if p == "kalshi":
+        # Kalshi taker fee: 0.07 * p * (1-p) per contract, capped at $0.0175
+        return min(0.07 * price * (1 - price), 0.0175)
+    elif p == "manifold":
         return 0.07 * price * (1 - price)
     elif p == "predictit":
         profit_fee = max(0, (1.0 - price)) * 0.10
@@ -128,9 +131,8 @@ def estimate_fee(platform: str, price: float) -> float:
     elif p == "polymarket":
         return price * 0.001
     elif p == "ibkr":
-        # ForecastEx has a simpler fee structure, essentially 0 for limit makers currently
-        # We can implement explicit tier-based pricing if user provides rules in the future.
-        return 0.0
+        # IBKR ForecastEx: $0.01 fixed fee per contract
+        return 0.01
     return 0.0
 
 

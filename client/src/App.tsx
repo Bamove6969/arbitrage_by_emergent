@@ -72,11 +72,15 @@ function App() {
           <SidebarProvider defaultOpen={true}>
             <AppSidebar />
             <SidebarInset className="bg-background flex flex-col h-screen">
-              <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b bg-background px-4">
+              <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b bg-background px-4">
                 <div className="flex items-center gap-2">
-                  <SidebarTrigger className="-ml-1" />
+                  <SidebarTrigger className="-ml-1" data-testid="sidebar-trigger" />
                   <Separator orientation="vertical" className="mr-2 h-4 hidden md:block" />
-                  <div className="font-semibold text-sm md:text-base hidden sm:block">Arb Finder Terminal</div>
+                  <div className="font-mono text-xs uppercase tracking-[0.25em] text-muted-foreground hidden sm:block" data-testid="header-title">Arb Terminal</div>
+                </div>
+                <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                  <span className="size-1.5 rounded-full bg-chart-1 pulse-dot" />
+                  Live
                 </div>
               </header>
               <div className="flex-1 overflow-auto pb-24">

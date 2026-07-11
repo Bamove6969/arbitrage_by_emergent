@@ -25,7 +25,8 @@ import {
   VolumeX,
   Clock,
   Check,
-  Square
+  Square,
+  Radar
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -505,10 +506,10 @@ export default function SentinelPage() {
       <div className="flex items-center justify-between gap-4 mb-6 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Eye className="w-6 h-6 text-blue-500" />
-            Sentinel
+            <Radar className="w-6 h-6 text-primary" />
+            Arbitrage Radar
           </h1>
-          <p className="text-sm text-muted-foreground">Market watchlist and alerts</p>
+          <p className="text-sm text-muted-foreground font-mono text-xs uppercase tracking-widest">Live cross-platform scanner · watchlist · alerts</p>
         </div>
         {unreadAlerts.length > 0 && (
           <Badge variant="destructive" className="animate-pulse" data-testid="badge-unread-alerts">
@@ -516,6 +517,92 @@ export default function SentinelPage() {
           </Badge>
         )}
       </div>
+
+        <Card className="mb-6">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <RefreshCw className="w-5 h-5" />
+              Scan Settings
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex-1">
+                <div className="font-medium">Auto-Scan Markets</div>
+                <p className="text-sm text-muted-foreground">
+                  {autoScanEnabled 
+                    ? `Scanning every ${scanInterval} minute${scanInterval !== "1" ? "s" : ""}`
+                    : "Enable to automatically find arbitrage opportunities"
+                  }
+                </p>
+                {lastScan && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Last scan: {lastScan.toLocaleTimeString()}
+                  </p>
+                )}
+              </div>
+              <Switch 
+                checked={autoScanEnabled} 
+                onCheckedChange={handleToggleAutoScan}
+                data-testid="switch-auto-scan"
+                disabled={updateScannerMutation.isPending}
+              />
+            </div>
+            {autoScanEnabled && (
+              <div className="flex items-center gap-4">
+                <Label htmlFor="scan-interval" className="whitespace-nowrap">Scan every:</Label>
+                <Select value={scanInterval} onValueChange={setScanInterval}>
+                  <SelectTrigger className="w-32" data-testid="select-scan-interval">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="5">5 minutes</SelectItem>
+                    <SelectItem value="10">10 minutes</SelectItem>
+                    <SelectItem value="15">15 minutes</SelectItem>
+                    <SelectItem value="30">30 minutes</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <div className="border-t pt-4">
+              <div className="font-medium mb-2">Platforms to Scan</div>
+              <p className="text-xs text-muted-foreground mb-3">
+                Toggle which platforms to include in arbitrage scanning
+              </p>
+              <div className="flex gap-3 flex-wrap">
+                {PLATFORMS.map((platform) => (
+                  <Button
+                    key={platform.id}
+                    variant={enabledPlatforms.includes(platform.name) ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => togglePlatform(platform.name)}
+                    data-testid={`toggle-platform-${platform.id}`}
+                  >
+                    {enabledPlatforms.includes(platform.name) ? (
+                      <Check className="w-4 h-4 mr-1" />
+                    ) : null}
+                    {platform.name}
+                  </Button>
+                ))}
+              </div>
+              {enabledPlatforms.length === 2 && (
+                <p className="text-xs text-muted-foreground mt-2">
+                  Only showing {enabledPlatforms.join(" vs ")} matches
+                </p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="mb-6">
+          <MarketBrowser 
+            autoRefresh={autoScanEnabled}
+            refreshInterval={scanInterval}
+            enabledPlatforms={enabledPlatforms}
+            onScanComplete={() => setLastScan(new Date())}
+            excludeWeather={true}
+          />
+        </div>
 
       <Card className="mb-6">
           <CardHeader>
@@ -695,92 +782,6 @@ export default function SentinelPage() {
             </Button>
           </CardContent>
         </Card>
-
-        <Card className="mb-6">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <RefreshCw className="w-5 h-5" />
-              Scan Settings
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex-1">
-                <div className="font-medium">Auto-Scan Markets</div>
-                <p className="text-sm text-muted-foreground">
-                  {autoScanEnabled 
-                    ? `Scanning every ${scanInterval} minute${scanInterval !== "1" ? "s" : ""}`
-                    : "Enable to automatically find arbitrage opportunities"
-                  }
-                </p>
-                {lastScan && (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Last scan: {lastScan.toLocaleTimeString()}
-                  </p>
-                )}
-              </div>
-              <Switch 
-                checked={autoScanEnabled} 
-                onCheckedChange={handleToggleAutoScan}
-                data-testid="switch-auto-scan"
-                disabled={updateScannerMutation.isPending}
-              />
-            </div>
-            {autoScanEnabled && (
-              <div className="flex items-center gap-4">
-                <Label htmlFor="scan-interval" className="whitespace-nowrap">Scan every:</Label>
-                <Select value={scanInterval} onValueChange={setScanInterval}>
-                  <SelectTrigger className="w-32" data-testid="select-scan-interval">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="5">5 minutes</SelectItem>
-                    <SelectItem value="10">10 minutes</SelectItem>
-                    <SelectItem value="15">15 minutes</SelectItem>
-                    <SelectItem value="30">30 minutes</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-            <div className="border-t pt-4">
-              <div className="font-medium mb-2">Platforms to Scan</div>
-              <p className="text-xs text-muted-foreground mb-3">
-                Toggle which platforms to include in arbitrage scanning
-              </p>
-              <div className="flex gap-3 flex-wrap">
-                {PLATFORMS.map((platform) => (
-                  <Button
-                    key={platform.id}
-                    variant={enabledPlatforms.includes(platform.name) ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => togglePlatform(platform.name)}
-                    data-testid={`toggle-platform-${platform.id}`}
-                  >
-                    {enabledPlatforms.includes(platform.name) ? (
-                      <Check className="w-4 h-4 mr-1" />
-                    ) : null}
-                    {platform.name}
-                  </Button>
-                ))}
-              </div>
-              {enabledPlatforms.length === 2 && (
-                <p className="text-xs text-muted-foreground mt-2">
-                  Only showing {enabledPlatforms.join(" vs ")} matches
-                </p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        <div className="mb-6">
-          <MarketBrowser 
-            autoRefresh={autoScanEnabled}
-            refreshInterval={scanInterval}
-            enabledPlatforms={enabledPlatforms}
-            onScanComplete={() => setLastScan(new Date())}
-            excludeWeather={true}
-          />
-        </div>
 
         <Card className="mb-6">
           <CardHeader className="pb-3">

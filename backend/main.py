@@ -182,6 +182,8 @@ async def startup():
     logger.info("Log buffer initialized with stdout/stderr redirection")
 
     await init_db()
+    from backend.scanner import load_cached_from_db
+    await load_cached_from_db()
     asyncio.create_task(auto_scan_loop())
     logger.info("Backend started, auto-scan loop initiated")
 
@@ -901,12 +903,14 @@ async def get_markets(q: Optional[str] = None):
 @app.get("/api/market-stats")
 async def market_stats():
     markets = get_cached_markets()
+    kalshi_count = sum(1 for m in markets if m["platform"] == "Kalshi")
     manifold_count = sum(1 for m in markets if m["platform"] == "Manifold")
     poly_count = sum(1 for m in markets if m["platform"] == "Polymarket")
     pi_count = sum(1 for m in markets if m["platform"] == "PredictIt")
     ibkr_count = sum(1 for m in markets if m["platform"].lower() == "ibkr")
     state = get_scan_state()
     return {
+        "kalshi": kalshi_count,
         "manifold": manifold_count,
         "polymarket": poly_count,
         "predictit": pi_count,

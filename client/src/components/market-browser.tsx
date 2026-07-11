@@ -1168,8 +1168,8 @@ export function MarketBrowser({
               disabled={isLoading}
               data-testid="button-refresh-markets"
             >
-              <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
-              Refresh
+              <RefreshCw className={`w-4 h-4 mr-2 ${isLoading || isScanning ? "animate-spin" : ""}`} />
+              {isScanning ? "Scanning..." : "Scan"}
             </Button>
             <BackendLogViewer />
           </div>
@@ -1445,7 +1445,7 @@ export function MarketBrowser({
                 ) : (
                   <>
                     <p>No matching markets found yet.</p>
-                    <p className="text-sm">Run Colab to find arbitrage opportunities, or hit Scan to refresh market data.</p>
+                    <p className="text-sm">Hit Scan to fetch live markets and find cross-platform arbitrage opportunities.</p>
                   </>
                 )}
               </div>

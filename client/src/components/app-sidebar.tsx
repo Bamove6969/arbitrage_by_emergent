@@ -46,12 +46,12 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
               <Link href="/sentinel">
-                <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                <div className="flex aspect-square size-8 items-center justify-center rounded-sm bg-primary text-primary-foreground">
                   <LineChart className="size-4" />
                 </div>
                 <div className="flex flex-col gap-0.5 leading-none">
-                  <span className="font-semibold text-base">Arb Finder</span>
-                  <span className="text-xs text-muted-foreground uppercase tracking-wider font-semibold text-blue-500">Terminal Pro v1.3.0 ● Nuance Engine</span>
+                  <span className="font-black text-base tracking-tight">ARB TERMINAL</span>
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-[0.2em] font-mono">Prediction Market Arbitrage</span>
                 </div>
               </Link>
             </SidebarMenuButton>

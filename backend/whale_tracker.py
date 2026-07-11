@@ -20,7 +20,15 @@ def fetch_leaderboard(time_period: str = "ALL", category: str = "OVERALL") -> Li
         }
         resp = requests.get(url, params=params, timeout=10)
         resp.raise_for_status()
-        return resp.json()
+        rows = resp.json()
+        # Normalize Data API fields to what the frontend expects
+        return [{
+            **r,
+            "username": r.get("userName") or r.get("username") or "",
+            "proxyAddress": r.get("proxyWallet") or r.get("proxyAddress") or "",
+            "volume": r.get("vol") or r.get("volume") or 0,
+            "pnl": r.get("pnl", 0),
+        } for r in rows]
     except Exception as e:
         logger.error(f"Failed to fetch Polymarket leaderboard: {e}")
         return []
