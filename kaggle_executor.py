@@ -48,8 +48,15 @@ def _ensure_kaggle_cfg():
     creds = {"username": KAGGLE_USERNAME, "key": KAGGLE_KEY}
     kcfg.write_text(json.dumps(creds))
     kcfg.chmod(0o600)
-    _kaggle_env = {**os.environ, "KAGGLE_USERNAME": KAGGLE_USERNAME, "KAGGLE_KEY": KAGGLE_KEY}
-    logger.info(f"Kaggle creds written to {kcfg}")
+    # The CLI prefers env vars over kaggle.json, and a KAGGLE_* var it considers
+    # malformed poisons auth for every call (401 on kernels the account owns).
+    # kaggle.json alone is verified to authenticate, so strip the env-var path.
+    _kaggle_env = {
+        k: v for k, v in os.environ.items()
+        if k not in ("KAGGLE_USERNAME", "KAGGLE_KEY", "KAGGLE_API_TOKEN")
+    }
+    _kaggle_env["HOME"] = str(Path.home())
+    logger.info(f"Kaggle creds written to {kcfg}; CLI auth via kaggle.json only")
 
 
 def _get_ngrok_ws_url() -> str:
@@ -206,7 +213,11 @@ def _rewrite_and_push(ws_url: str) -> str:
             "kernel_type":         "notebook",
             "is_private":          True,
             "enable_gpu":          True,
-            "accelerator":         "GPU_T4_X2",
+            # Kaggle's only T4 shape IS the dual-T4 pool (no single-T4 option
+            # exists). The old "accelerator": "GPU_T4_X2" key was silently
+            # ignored by every CLI version and the server defaulted to ONE GPU,
+            # tripping the notebook's dual-GPU gate. Requires kaggle CLI >= 2.x.
+            "machine_shape":       "NvidiaTeslaT4",
             "enable_internet":     True,
             "dataset_sources":     [],
             "competition_sources": [],
@@ -215,8 +226,11 @@ def _rewrite_and_push(ws_url: str) -> str:
         }
         (Path(tmpdir) / "kernel-metadata.json").write_text(json.dumps(meta))
 
+        # --accelerator is documented to override the enable_gpu boolean, which
+        # otherwise wins server-side and allocates a legacy single GPU even when
+        # machine_shape is present in the metadata file.
         result = subprocess.run(
-            ["kaggle", "kernels", "push", "-p", tmpdir],
+            ["kaggle", "kernels", "push", "-p", tmpdir, "--accelerator", "NvidiaTeslaT4"],
             capture_output=True, text=True, env=_kaggle_env, timeout=120,
         )
         out = (result.stdout or "") + (result.stderr or "")

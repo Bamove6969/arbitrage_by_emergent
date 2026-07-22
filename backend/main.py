@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import uuid
 import logging
 import collections
@@ -182,22 +183,47 @@ async def startup():
     logger.info("Log buffer initialized with stdout/stderr redirection")
 
     await init_db()
-    from backend.scanner import load_cached_from_db
-    await load_cached_from_db()
+
+    # Arbitrage edges are perishable, so a fresh container must not present a
+    # previous run's prices as current results. Restoring the cache is opt-in.
+    if os.getenv("RESTORE_CACHE_ON_BOOT", "0") == "1":
+        from backend.scanner import load_cached_from_db
+        await load_cached_from_db()
+        logger.info("Restored cached markets/opportunities (RESTORE_CACHE_ON_BOOT=1)")
+    else:
+        from backend.scanner import clear_stale_results
+        clear_stale_results()
+        logger.info("Starting with empty results - a fresh scan is required")
+
     asyncio.create_task(auto_scan_loop())
+
+    if os.getenv("SCAN_ON_STARTUP", "1") == "1":
+        from backend.scanner import register_scan_task
+        logger.info("Kicking off startup scan for fresh prices")
+        task = asyncio.create_task(run_scan())
+        register_scan_task(task)
+
     logger.info("Backend started, auto-scan loop initiated")
 
 
 @app.post("/api/reset-scan")
 async def reset_scan():
-    """Force-reset stuck scan state so a new scan can be triggered."""
-    from backend.scanner import scan_state
-    scan_state["is_scanning"] = False
-    scan_state["status"] = "idle"
-    scan_state["phase"] = "idle"
-    scan_state["message"] = "Scan reset by user"
-    scan_state["progress"] = 0
-    return {"status": "reset", "message": "Scan state reset"}
+    """Cancel any in-flight scan and clear state so a new one can be started.
+
+    Resetting only the flags was not enough: the scan runs as a detached task, so
+    it kept going and overwrote them a moment later.
+    """
+    from backend.scanner import abort_scan
+    result = await abort_scan()
+    return {
+        "status": "reset",
+        "message": (
+            "Running scan cancelled and state cleared"
+            if result["cancelled_running_scan"]
+            else "Scan state cleared"
+        ),
+        **result,
+    }
 
 
 @app.get("/api/health")
@@ -672,7 +698,9 @@ async def trigger_scan(request: Request = None):
     state = get_scan_state()
     if state["is_scanning"]:
         return {"status": "already_scanning", "message": "A scan is already in progress"}
-    asyncio.create_task(run_scan(platforms))
+    from backend.scanner import register_scan_task
+    task = asyncio.create_task(run_scan(platforms))
+    register_scan_task(task)  # so /api/reset-scan can actually cancel it
     return {"status": "started", "message": "Scan started in background"}
 
 

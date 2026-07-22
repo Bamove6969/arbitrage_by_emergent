@@ -100,6 +100,58 @@ function StageGlyph({ status }: { status: KaggleStage["status"] }) {
 
 /* ── Notebook 1: Cloud GPU Matcher — cell-by-cell timeline ── */
 
+function beaconAge(updatedAt: string | null): number | null {
+  if (!updatedAt) return null;
+  return Math.max(0, Math.round((Date.now() - new Date(updatedAt + "Z").getTime()) / 1000));
+}
+
+/* Loud banner naming exactly which stage is being applied to the data right now */
+function CurrentStageBanner({ state }: { state?: KaggleState }) {
+  const stages = state?.stages ?? [];
+  const active = stages.find((s) => s.status === "running");
+  const age = beaconAge(state?.updated_at ?? null);
+  const stale = state?.running && age !== null && age > 120;
+  if (!state?.running && !active) return null;
+  return (
+    <Card className="border-primary/40 bg-primary/5">
+      <CardContent className="flex flex-wrap items-center gap-x-4 gap-y-2 p-4">
+        <Loader2 className="size-5 animate-spin text-primary" strokeWidth={2} />
+        <div className="min-w-0 flex-1">
+          <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
+            Now applying to data
+          </p>
+          <p className="text-base font-semibold">
+            {active ? `[${active.index + 1}/${stages.length}] ${active.name}` : "Notebook starting…"}
+          </p>
+          {active?.message && (
+            <p className="mt-0.5 whitespace-pre-wrap break-words font-mono text-xs text-primary">
+              ▸ {active.message}
+            </p>
+          )}
+        </div>
+        <div className="shrink-0 text-right font-mono text-[10px] tabular-nums text-muted-foreground">
+          {active?.started_at && <div>stage: {elapsed(active.started_at, null)}</div>}
+          {age !== null && (
+            <div className={stale ? "font-bold text-destructive" : ""}>
+              beacon: {age}s ago{stale ? " — STALE" : ""}
+            </div>
+          )}
+          {state?.kernel && (
+            <a
+              href={`https://www.kaggle.com/code/${state.kernel}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-primary underline underline-offset-2"
+            >
+              open kernel ↗
+            </a>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function MatcherPanel({ state }: { state?: KaggleState }) {
   const stages = state?.stages ?? [];
   const isLive = state?.running ?? false;
@@ -163,7 +215,7 @@ function MatcherPanel({ state }: { state?: KaggleState }) {
                       )}
                     </div>
                     {stage.message && (
-                      <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+                      <p className="mt-0.5 whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground">
                         {isActive && <span className="text-primary">▸ </span>}
                         {stage.message}
                       </p>
@@ -321,6 +373,8 @@ export default function PipelinePage() {
         description="Follow both notebooks cell-by-cell as the GPU matcher and LLM verifier execute"
         icon={Workflow}
       />
+
+      <CurrentStageBanner state={kaggle} />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <MatcherPanel state={kaggle} />

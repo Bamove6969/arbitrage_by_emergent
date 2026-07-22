@@ -29,9 +29,14 @@ services:
       - IB_LOGINTAB=IB API
       - IB_LOGINTYPE=Live Trading
       - IB_PREFER_IBKEY=true
-      - IBG_PORT_INTERNAL=4000
-      - IB_GATEWAY_URL=http://localhost:4000
+      # Internal port MUST differ from external 4000: socat listens on 4000 and
+      # forwards to this one. Setting both to 4000 made socat forward to itself,
+      # which false-passed the 2FA gate and blocked the gateway from ever binding.
+      - IBG_PORT_INTERNAL=4001
+      - IB_GATEWAY_URL=http://localhost:4001
       - IBGA_WAIT_TIMEOUT=${IBGA_WAIT_TIMEOUT:-600}
+      - TWO_FA_WINDOW=${TWO_FA_WINDOW:-240}
+      - MAX_2FA_RETRIES=${MAX_2FA_RETRIES:-5}
       # ----- Backend / LLM -----
       - PYTHONPATH=/app
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
@@ -47,6 +52,11 @@ services:
       # IBKR round 2 (warm TWS re-pass, ~17 min): on | off | auto (default auto =
       # skip when the prior scan's round 2 added < IBKR_ROUND2_MIN_NEW markets).
       - IBKR_ROUND2=${IBKR_ROUND2:-auto}
+      # Post-scan push of the GPU matcher notebook to Kaggle (0 = manual only)
+      - AUTO_DISPATCH_KAGGLE=${AUTO_DISPATCH_KAGGLE:-1}
+      # full = CPU pairwise match locally (results appear pre-Kaggle);
+      # skip = leave all ranking to the Kaggle GPU matcher
+      - LOCAL_MATCH=${LOCAL_MATCH:-full}
       - IBKR_ROUND2_MIN_NEW=${IBKR_ROUND2_MIN_NEW:-25}
       - REMOTE_VERIFY=${REMOTE_VERIFY:-1}
       - REMOTE_VERIFY_AUTOLAUNCH=${REMOTE_VERIFY_AUTOLAUNCH:-0}

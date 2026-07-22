@@ -65,17 +65,16 @@ interface ArbitrageResult {
 }
 
 const PLATFORMS = [
-  { id: "kalshi", name: "Kalshi" },
   { id: "polymarket", name: "Polymarket" },
   { id: "predictit", name: "PredictIt" },
   { id: "ibkr", name: "IBKR ForecastEx" },
 ];
 
 export default function ArbitrageCalculator() {
-  const [siteAName, setSiteAName] = useState("Kalshi");
-  const [siteBName, setSiteBName] = useState("Polymarket");
-  const [siteCName, setSiteCName] = useState("PredictIt");
-  const [siteDName, setSiteDName] = useState("IBKR ForecastEx");
+  const [siteAName, setSiteAName] = useState("Polymarket");
+  const [siteBName, setSiteBName] = useState("PredictIt");
+  const [siteCName, setSiteCName] = useState("IBKR ForecastEx");
+  const [siteDName, setSiteDName] = useState("Polymarket");
   const [siteAYes, setSiteAYes] = useState("");
   const [siteBYes, setSiteBYes] = useState("");
   const [siteCYes, setSiteCYes] = useState("");
@@ -91,7 +90,6 @@ export default function ArbitrageCalculator() {
   // Get platform URL for viewing markets
   const getPlatformUrl = (platform: string): string => {
     const p = platform.toLowerCase();
-    if (p === "kalshi") return "https://kalshi.com/markets";
     if (p === "polymarket") return "https://polymarket.com";
     if (p === "predictit") return "https://www.predictit.org";
     if (p.includes("ibkr")) return "https://forecasttrader.interactivebrokers.com";
@@ -144,17 +142,7 @@ export default function ArbitrageCalculator() {
     // Safety check for invalid price
     if (price <= 0 || price >= 1) return 0;
 
-    if (platformLower === "kalshi") {
-      // Kalshi 2026: Variable fee based on contract price p*(1-p)
-      // Taker: 7% multiplier, Maker: 1.75% multiplier
-      const multiplier = mode === "Taker" ? 0.07 : 0.0175;
-      const feePerContract = multiplier * price * (1 - price);
-      
-      // Caps: Taker $1.75 per 100 contracts ($0.0175), Maker $0.44 per 100 ($0.0044)
-      const cap = mode === "Taker" ? 0.0175 : 0.0044;
-      return Math.min(cap, feePerContract) * contracts;
-
-    } else if (platformLower === "polymarket") {
+    if (platformLower === "polymarket") {
       // Polymarket 2026: 0% fee on most standard markets
       // (Only 15-min crypto and specific sports have taker fees, defaulting to 0 for general arb)
       return 0;
@@ -390,10 +378,10 @@ export default function ArbitrageCalculator() {
   });
 
   const handleReset = () => {
-    setSiteAName("Kalshi");
-    setSiteBName("Polymarket");
-    setSiteCName("PredictIt");
-    setSiteDName("IBKR ForecastEx");
+    setSiteAName("Polymarket");
+    setSiteBName("PredictIt");
+    setSiteCName("IBKR ForecastEx");
+    setSiteDName("Polymarket");
     setSiteAYes("");
     setSiteBYes("");
     setSiteCYes("");
@@ -690,8 +678,8 @@ export default function ArbitrageCalculator() {
                 <Info className="w-4 h-4 text-muted-foreground flex-shrink-0 mt-0.5" />
                 <p className="text-sm text-muted-foreground">
                   {orderMode === "Maker" 
-                    ? "Maker orders (Limit Orders) have 0% fees on Kalshi and Polymarket. Best for patient traders."
-                    : "Taker orders (Market Orders) have a 2% fee on Kalshi profits. Faster execution but slightly lower returns."
+                    ? "Maker orders (Limit Orders) have 0% fees on Polymarket. Best for patient traders."
+                    : "Taker orders (Market Orders) incur platform taker fees. Faster execution but slightly lower returns."
                   }
                 </p>
               </div>
@@ -811,7 +799,7 @@ export default function ArbitrageCalculator() {
                       <div className="flex items-center justify-between py-2 text-amber-600 dark:text-amber-400">
                         <span className="text-sm flex items-center gap-1">
                           <DollarSign className="w-4 h-4" />
-                          Est. Kalshi Fees
+                          Est. Platform Fees
                         </span>
                         <span className="font-mono font-semibold" data-testid={`text-fees-${index + 1}`}>
                           -${result.totalFees.toFixed(2)}

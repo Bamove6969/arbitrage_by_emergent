@@ -11,7 +11,6 @@ import NotFound from "@/pages/not-found";
 import ArbitrageCalculator from "@/pages/arbitrage-calculator";
 import HistoryPage from "@/pages/history";
 import SentinelPage from "@/pages/sentinel";
-import WeatherTerminalPage from "@/pages/weather";
 import WhaleTrackerPage from "@/pages/whales";
 import AnalysisPage from "@/pages/analysis";
 import PipelinePage from "@/pages/pipeline";
@@ -26,7 +25,6 @@ function Router() {
       <Route path="/" component={ArbitrageCalculator} />
       <Route path="/history" component={HistoryPage} />
       <Route path="/sentinel" component={SentinelPage} />
-      <Route path="/weather" component={WeatherTerminalPage} />
       <Route path="/whales" component={WhaleTrackerPage} />
       <Route path="/analysis" component={AnalysisPage} />
       <Route path="/pipeline" component={PipelinePage} />
@@ -39,7 +37,6 @@ const ROUTE_LABELS: Record<string, string> = {
   "/": "MANUAL CALC",
   "/history": "TRADE HISTORY",
   "/sentinel": "ARBITRAGE RADAR",
-  "/weather": "WEATHER TERMINAL",
   "/whales": "WHALE TRACKER",
   "/analysis": "ML ANALYSIS",
   "/pipeline": "NOTEBOOK PIPELINE",

@@ -44,6 +44,66 @@ def _broadcast_state():
     """Broadcast current scan state to all WebSocket clients"""
     _broadcast_scan_update("scan_state", scan_state.copy())
 
+# Handle on the in-flight run_scan() task. Without it a "reset" could only flip
+# the state flags while the real coroutine kept running and stomped them back.
+_active_scan_task: "Optional[asyncio.Task]" = None
+
+
+def register_scan_task(task: "asyncio.Task") -> None:
+    global _active_scan_task
+    _active_scan_task = task
+
+
+def clear_stale_results() -> None:
+    """Drop any results carried over from a previous run.
+
+    Without this a restart shows the last run's opportunities as if they were
+    current, which for arbitrage means acting on edges that may have closed.
+    """
+    _all_markets.clear()
+    _all_opportunities.clear()
+    scan_state["total_markets"] = 0
+    scan_state["total_opportunities"] = 0
+    scan_state["pairs_found"] = 0
+    scan_state["progress"] = 0
+    scan_state["phase"] = "idle"
+    scan_state["status"] = "idle"
+    scan_state["is_scanning"] = False
+    scan_state["ibkr_scan_rounds_done"] = 0
+    scan_state["message"] = "No scan yet - results will appear when a scan completes"
+
+
+async def abort_scan() -> dict:
+    """Cancel any in-flight scan and return state to idle.
+
+    Safe to call when nothing is running - it still clears stale state, which is
+    the case that used to leave the dashboard stuck showing a finished scan.
+    """
+    global _active_scan_task
+    cancelled = False
+    task = _active_scan_task
+    if task is not None and not task.done():
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+        cancelled = True
+    _active_scan_task = None
+
+    scan_state["is_scanning"] = False
+    scan_state["status"] = "idle"
+    scan_state["phase"] = "idle"
+    scan_state["message"] = "Scan reset by user"
+    scan_state["progress"] = 0
+    scan_state["total_comparisons"] = 0
+    scan_state["completed_comparisons"] = 0
+    scan_state["platform_counts"] = {"polymarket": 0, "predictit": 0, "ibkr": 0}
+    _fetch_status.clear()
+    _broadcast_state()
+    return {"cancelled_running_scan": cancelled}
+
+
 scan_state = {
     "is_scanning": False,
     "progress": 0,
@@ -593,9 +653,14 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
         return {"status": "already_scanning", "message": "A scan is already in progress"}
 
     scan_state["is_scanning"] = True
+    # Must be reset here: load_cached_from_db() marks state "complete" at boot, and
+    # nothing else ever clears it, so without this every later scan still reads as
+    # finished to the dashboard and the /live page's "scanning" branch never fires.
+    scan_state["status"] = "scanning"
     scan_state["progress"] = 0
     scan_state["phase"] = "Fetching markets"
     scan_state["message"] = "Starting scan..."
+    scan_state["ibkr_scan_rounds_done"] = 0
     scan_state["platform_counts"] = {"polymarket": 0, "predictit": 0, "ibkr": 0}
     _fetch_status.clear()
     _broadcast_state()  # Broadcast to WebSocket clients
@@ -657,6 +722,14 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
         poly_markets = results.get("Polymarket", [])
         pi_markets = results.get("PredictIt", [])
         ibkr_markets = results.get("IBKR", [])
+
+        # fetch_ibkr_combined runs REST discovery then TWS pricing internally, so a
+        # non-empty result means both passes finished. The Kaggle notebook's primary
+        # gate polls this counter (>= 2) before it will pull markets; it was specced
+        # in scan_state but never written, leaving the notebook on its legacy
+        # fallback path forever.
+        if ibkr_markets:
+            scan_state["ibkr_scan_rounds_done"] = 2
 
         fetch_warnings = []
         if not poly_markets:
@@ -730,11 +803,22 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
                 scan_state["message"] = f"Compared {completed:,} / {total:,} candidate pairs — {found} matches so far"
             loop.call_soon_threadsafe(_apply)
 
-        min_sim = float(os.environ.get("MATCH_MIN_SIMILARITY", "35"))
-        pairs = await loop.run_in_executor(
-            _matcher_pool,
-            lambda: find_arbitrage_pairs(all_markets, min_similarity=min_sim, on_progress=on_match_progress),
-        )
+        # LOCAL_MATCH=skip drops the CPU pairwise grind (~an hour on this box for
+        # 3M+ pairs) and leaves ranking entirely to the Kaggle GPU matcher, which
+        # re-derives candidates from the full market dump anyway. The trade-off:
+        # the dashboard shows no opportunities until the notebook reports back.
+        if os.environ.get("LOCAL_MATCH", "full").lower() in ("0", "off", "skip"):
+            logger.info("LOCAL_MATCH=skip - CPU matching skipped; GPU matcher ranks all pairs")
+            scan_state["message"] = (
+                f"CPU matching skipped - Kaggle GPU matcher will rank all {len(all_markets):,} markets"
+            )
+            pairs = []
+        else:
+            min_sim = float(os.environ.get("MATCH_MIN_SIMILARITY", "35"))
+            pairs = await loop.run_in_executor(
+                _matcher_pool,
+                lambda: find_arbitrage_pairs(all_markets, min_similarity=min_sim, on_progress=on_match_progress),
+            )
         pairs = pairs or []
 
         _all_opportunities.clear()
@@ -755,6 +839,23 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
         scan_state["next_scan_time"] = (datetime.utcnow() + timedelta(seconds=SCAN_INTERVAL_SECONDS)).isoformat()
         _broadcast_state()  # Broadcast scan complete
 
+        # Auto-dispatch the GPU matcher notebook. Nothing else triggers the
+        # executor: the orchestrator that once did is dead code no module
+        # imports, so without this POST "auto upload to Kaggle" never happens
+        # and the executor waits forever for a request that never comes.
+        if os.environ.get("AUTO_DISPATCH_KAGGLE", "1") == "1":
+            executor_url = os.environ.get("ORACLE_EXECUTOR_URL", "http://localhost:5000")
+            try:
+                import httpx
+                async with httpx.AsyncClient(timeout=20) as client:
+                    resp = await client.post(f"{executor_url}/execute", json={})
+                logger.info(f"Kaggle matcher auto-dispatched: {resp.json()}")
+            except Exception as e:
+                logger.warning(
+                    f"Kaggle auto-dispatch failed ({e}) - dispatch manually: "
+                    f"curl -X POST {executor_url}/execute"
+                )
+
         return {
             "status": "complete",
             "total_markets": len(all_markets),
@@ -766,6 +867,17 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
             },
         }
 
+    except asyncio.CancelledError:
+        # CancelledError is a BaseException, so the handler below never sees it and
+        # the finally clause (which only releases on "error") would leave the scan
+        # lock stuck on - blocking every future scan.
+        logger.info("Scan cancelled - releasing scan lock")
+        scan_state["is_scanning"] = False
+        scan_state["status"] = "idle"
+        scan_state["phase"] = "idle"
+        scan_state["progress"] = 0
+        raise
+
     except Exception as e:
         logger.error(f"Scan error: {e}", exc_info=True)
         scan_state["status"] = "error"
@@ -775,7 +887,7 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
 
     finally:
         # We used to set scan_state["is_scanning"] = False here, but we shouldn't anymore!
-        # The scan isn't technically "done" until Colab responds. 
+        # The scan isn't technically "done" until Colab responds.
         # But we DO release the lock if there was an error.
         if scan_state["status"] == "error":
             scan_state["is_scanning"] = False
@@ -795,9 +907,17 @@ async def auto_scan_loop():
             
             if scan_state.get("auto_scan_enabled", False):
                 logger.info("Triggering scan (Auto-scan is ON)")
-                result = await run_scan()
+                # Run as its own task and register it, so a user reset cancels the
+                # scan without also cancelling (and permanently killing) this loop.
+                task = asyncio.create_task(run_scan())
+                register_scan_task(task)
+                try:
+                    result = await task
+                except asyncio.CancelledError:
+                    logger.info("Auto-scan cancelled by user reset")
+                    result = {"status": "cancelled"}
                 logger.info(f"Scan complete: {result.get('status')} — {result.get('total_markets', 0)} markets found")
-            
+
         except Exception as e:
             logger.error(f"Auto-scan loop error: {e}", exc_info=True)
         

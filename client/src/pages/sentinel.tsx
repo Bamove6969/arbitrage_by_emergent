@@ -34,7 +34,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 // Available platforms with their fee structures (2026 Updated)
 const PLATFORMS = [
-  { id: "kalshi", name: "Kalshi", feeType: "Variable (Maker/Taker)", description: "0.0175% to 0.07% based on price" },
   { id: "polymarket", name: "Polymarket", feeType: "0% Commission", description: "Standard markets are free" },
   { id: "predictit", name: "PredictIt", feeType: "Profit & Withdraw Fees", description: "10% on profit, 5% on withdrawal" },
   { id: "ibkr", name: "IBKR Forecast", feeType: "$0.01 / contract", description: "Fixed pricing ($1 per 100 shares)" },
@@ -42,10 +41,10 @@ const PLATFORMS = [
 
 // Preset markets - popular questions across platforms (prices fetched live)
 const PRESET_MARKETS = [
-  { id: "fed-rate-cut", name: "Fed Rate Cut This Year", siteA: "Kalshi", siteB: "Polymarket" },
-  { id: "recession-2026", name: "US Recession in 2026", siteA: "Kalshi", siteB: "Polymarket" },
-  { id: "trump-approval", name: "Trump Approval Rating Above 50%", siteA: "Kalshi", siteB: "PredictIt" },
-  { id: "btc-100k", name: "Bitcoin Above $100K by Year End", siteA: "Kalshi", siteB: "Polymarket" },
+  { id: "fed-rate-cut", name: "Fed Rate Cut This Year", siteA: "Polymarket", siteB: "PredictIt" },
+  { id: "recession-2026", name: "US Recession in 2026", siteA: "Polymarket", siteB: "IBKR Forecast" },
+  { id: "trump-approval", name: "Trump Approval Rating Above 50%", siteA: "PredictIt", siteB: "IBKR Forecast" },
+  { id: "btc-100k", name: "Bitcoin Above $100K by Year End", siteA: "Polymarket", siteB: "IBKR Forecast" },
 ];
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -72,13 +71,7 @@ function calculatePlatformFee(platform: string, price: number, contracts: number
   
   if (price <= 0 || price >= 1) return 0;
 
-  if (platformLower === "kalshi") {
-    const multiplier = mode === "Taker" ? 0.07 : 0.0175;
-    const feePerContract = multiplier * price * (1 - price);
-    const cap = mode === "Taker" ? 0.0175 : 0.0044;
-    return Math.min(cap, feePerContract) * contracts;
-
-  } else if (platformLower === "polymarket") {
+  if (platformLower === "polymarket") {
     // 0% for standard markets
     return 0;
 
@@ -170,8 +163,8 @@ function calculateBestRoi(
 
 export default function SentinelPage() {
   const [marketName, setMarketName] = useState("");
-  const [siteAName, setSiteAName] = useState("Kalshi");
-  const [siteBName, setSiteBName] = useState("Polymarket");
+  const [siteAName, setSiteAName] = useState("Polymarket");
+  const [siteBName, setSiteBName] = useState("PredictIt");
   const [siteAYes, setSiteAYes] = useState("");
   const [siteBYes, setSiteBYes] = useState("");
   const [investment, setInvestment] = useState("500");
@@ -188,7 +181,7 @@ export default function SentinelPage() {
   const [lastScan, setLastScan] = useState<Date | null>(null);
   
   // Platform toggles for filtering which platforms to scan
-  const [enabledPlatforms, setEnabledPlatforms] = useState<string[]>(["Kalshi", "Polymarket", "PredictIt", "IBKR Forecast"]);
+  const [enabledPlatforms, setEnabledPlatforms] = useState<string[]>(["Polymarket", "PredictIt", "IBKR Forecast"]);
   
   // Selected preset markets
   const [selectedPresets, setSelectedPresets] = useState<string[]>([]);

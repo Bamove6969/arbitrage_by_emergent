@@ -34,7 +34,7 @@ RUN uv pip install --system --break-system-packages -r requirements.txt \
         flask \
         playwright \
         nest_asyncio \
-        kaggle \
+        "kaggle==2.2.3" \
         rapidfuzz \
     && playwright install --with-deps chromium
 

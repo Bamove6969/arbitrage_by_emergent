@@ -8,7 +8,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { Search, TrendingUp, Loader2, RefreshCw, DollarSign, Plus, Clock, Link2, Check, ArrowUpDown, Filter, Flame, Timer, BarChart3, Zap, Star, ThumbsUp, ThumbsDown, HelpCircle, ExternalLink, PanelLeft, PanelRight, Layers, EyeOff, Terminal } from "lucide-react";
+import { Search, TrendingUp, Loader2, RefreshCw, DollarSign, Plus, Clock, Link2, Check, ArrowUpDown, Filter, Flame, Timer, BarChart3, Zap, Star, ThumbsUp, ThumbsDown, HelpCircle, ExternalLink, PanelLeft, PanelRight, Layers, EyeOff, Terminal, X } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -307,7 +307,7 @@ function LegSection({ leg, market, oppIdx, legIdx }: {
   oppIdx: number;
   legIdx: number;
 }) {
-  const accent = platformAccent[leg.platform] || platformAccent.Kalshi;
+  const accent = platformAccent[leg.platform] || platformAccent.Polymarket;
   const yesPercent = market.yesPrice * 100;
   const noPercent = market.noPrice * 100;
   const buyPrice = leg.price * 100;
@@ -509,7 +509,7 @@ function AllMarketsGrid({ markets, platformColors }: { markets: StandardizedMark
 export function MarketBrowser({ 
   autoRefresh = false, 
   refreshInterval = "5", 
-  enabledPlatforms = ["Kalshi", "Polymarket", "PredictIt", "IBKR Forecast"],
+  enabledPlatforms = ["Polymarket", "PredictIt", "IBKR Forecast"],
   onScanComplete,
   excludeWeather = false,
   onlyWeather = false,
@@ -743,6 +743,53 @@ export function MarketBrowser({
       setIsScanning(false);
       setScanStartTime(null);
       toast({ title: "Scan failed", description: "Could not start scan. Please try again.", variant: "destructive" });
+    }
+  };
+
+  interface KaggleStageLite {
+    index: number;
+    name: string;
+    status: string;
+    message: string;
+  }
+  interface KaggleStatusLite {
+    running: boolean;
+    kernel: string | null;
+    stages: KaggleStageLite[];
+  }
+  const [kaggleLive, setKaggleLive] = useState<KaggleStatusLite | null>(null);
+  useEffect(() => {
+    const poll = () =>
+      fetch("/api/kaggle-status")
+        .then((r) => r.json())
+        .then(setKaggleLive)
+        .catch(() => {});
+    poll();
+    const t = setInterval(poll, 5000);
+    return () => clearInterval(t);
+  }, []);
+
+  const resetScan = async () => {
+    try {
+      const res = await fetch("/api/reset-scan", { method: "POST" });
+      const data = await res.json();
+      setIsScanning(false);
+      setScanStartTime(null);
+      setScanElapsed(0);
+      setScanProgress(null);
+      refetchOpps();
+      toast({
+        title: data.cancelled_running_scan ? "Scan cancelled" : "Scan state cleared",
+        description: data.cancelled_running_scan
+          ? "The running scan was stopped. You can start a new one."
+          : "No scan was running. Ready to start a new one.",
+      });
+    } catch (e) {
+      toast({
+        title: "Reset failed",
+        description: "Could not reset the scan. Please try again.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -1173,6 +1220,17 @@ export function MarketBrowser({
               <RefreshCw className={`w-4 h-4 mr-2 ${isLoading || isScanning ? "animate-spin" : ""}`} />
               {isScanning ? "Scanning..." : "Scan"}
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="min-h-[44px]"
+              onClick={resetScan}
+              data-testid="button-reset-scan"
+              title="Cancel any running scan and clear scan state so a new scan can be started"
+            >
+              <X className="w-4 h-4 mr-2" />
+              Reset
+            </Button>
             <BackendLogViewer />
           </div>
         </div>
@@ -1191,9 +1249,6 @@ export function MarketBrowser({
         {stats && stats.total > 0 && (
           <div className="flex items-center gap-4 p-3 rounded-md border bg-muted/30 flex-wrap">
             <span className="text-sm font-medium">Live Markets:</span>
-            <Badge className={platformColors.Kalshi}>
-              Kalshi: {stats.kalshi.toLocaleString()}
-            </Badge>
             <Badge className={platformColors.Polymarket}>
               Polymarket: {stats.polymarket.toLocaleString()}
             </Badge>
@@ -1209,6 +1264,38 @@ export function MarketBrowser({
               Total: {stats.total.toLocaleString()} markets
             </span>
           </div>
+        )}
+
+        {(kaggleLive?.running || kaggleLive?.stages?.some((s) => s.status === "running")) && (
+          <a href="/pipeline" className="block" data-testid="kaggle-stage-strip">
+            <div className="flex items-center gap-3 p-3 rounded-md border border-primary/40 bg-primary/5">
+              <Loader2 className="w-4 h-4 animate-spin text-primary shrink-0" />
+              <div className="flex flex-col min-w-0 flex-1">
+                <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
+                  Kaggle · now applying to data
+                </span>
+                {(() => {
+                  const stages = kaggleLive?.stages ?? [];
+                  const active = stages.find((s) => s.status === "running");
+                  return (
+                    <>
+                      <span className="text-sm font-medium truncate">
+                        {active
+                          ? `[${active.index + 1}/${stages.length}] ${active.name}`
+                          : "Notebook starting…"}
+                      </span>
+                      {active?.message && (
+                        <span className="text-xs font-mono text-primary truncate">
+                          ▸ {active.message}
+                        </span>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+              <span className="text-xs text-primary underline shrink-0">full pipeline →</span>
+            </div>
+          </a>
         )}
 
         {(autoRefresh || isScanning) && (

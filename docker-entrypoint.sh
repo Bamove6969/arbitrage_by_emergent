@@ -44,7 +44,7 @@ start_ibga() {
     sleep 15  # let Xvfb + Java boot before we start watching the port
 }
 
-echo "[1/5] Starting IB Gateway (ibga manager)..."
+echo "[1/4] Starting IB Gateway (ibga manager)..."
 echo "      2FA push will go to your phone; you have ${TWO_FA_WINDOW}s per attempt."
 start_ibga
 echo "    ibga manager booted (log: $LOG_DIR/ibga.log)"
@@ -101,28 +101,60 @@ EXECUTOR_PID=$!
 sleep 3
 
 # ---------------------------------------------------------------------------
-# 5. Wait for the 2FA gate at IBG_PORT_INTERNAL. Re-send the push every
-#    TWO_FA_WINDOW seconds (default 120s) up to MAX_2FA_RETRIES attempts.
+# 5. Wait for the 2FA gate at IBG_PORT_INTERNAL (the gateway's real API bind;
+#    NEVER check 4000 -- socat holds that open from second one, which is how
+#    the old gate false-passed). Two phases per attempt:
+#      A. warmup: wait for ibga to actually raise the 2FA challenge (first
+#         boot can spend minutes installing the gateway before a login form
+#         even exists -- the push window must not count against that).
+#      B. approval: once the challenge is real, give the user TWO_FA_WINDOW
+#         seconds; on expiry restart ibga to send a fresh push.
 # ---------------------------------------------------------------------------
-IBG_PORT="${IBG_PORT_INTERNAL:-4000}"
-echo "[4/4] Waiting on IBKR 2FA approval (localhost:${IBG_PORT})..."
+IBG_PORT="${IBG_PORT_INTERNAL:-4001}"
+IBGA_WAIT_TIMEOUT="${IBGA_WAIT_TIMEOUT:-600}"
+echo "[4/4] Waiting on IBKR login + 2FA approval (localhost:${IBG_PORT})..."
+
+challenge_count() {
+    awk '/waiting for two-factor authentication/{n++} END{print n+0}' \
+        "$LOG_DIR/ibga.log" 2>/dev/null || echo 0
+}
 
 ibga_up=0
 for attempt in $(seq 1 "$MAX_2FA_RETRIES"); do
-    echo "    [push ${attempt}/${MAX_2FA_RETRIES}] approve the IBKey notification on your phone within ${TWO_FA_WINDOW}s"
-    deadline=$(( $(date +%s) + TWO_FA_WINDOW ))
-    while [ "$(date +%s)" -lt "$deadline" ]; do
+    chal_base=$(challenge_count)
+    challenge_seen=0
+    warmup_deadline=$(( $(date +%s) + IBGA_WAIT_TIMEOUT ))
+    echo "    [attempt ${attempt}/${MAX_2FA_RETRIES}] waiting for gateway login to reach the 2FA challenge (up to ${IBGA_WAIT_TIMEOUT}s)..."
+    while [ "$(date +%s)" -lt "$warmup_deadline" ]; do
         if nc -z localhost "${IBG_PORT}" 2>/dev/null; then
-            ibga_up=1
-            echo "    IBKR API armed (push #${attempt} approved)"
+            ibga_up=1   # session resumed / TOTP auto-answered: no push needed
+            break
+        fi
+        if [ "$(challenge_count)" -gt "$chal_base" ]; then
+            challenge_seen=1
             break
         fi
         sleep 2
     done
-    [ "$ibga_up" -eq 1 ] && break
+
+    if [ "$challenge_seen" -eq 1 ]; then
+        echo "    [push ${attempt}/${MAX_2FA_RETRIES}] 2FA challenge is LIVE -- approve the IBKey notification within ${TWO_FA_WINDOW}s"
+        deadline=$(( $(date +%s) + TWO_FA_WINDOW ))
+        while [ "$(date +%s)" -lt "$deadline" ]; do
+            if nc -z localhost "${IBG_PORT}" 2>/dev/null; then
+                ibga_up=1
+                break
+            fi
+            sleep 2
+        done
+    fi
+    if [ "$ibga_up" -eq 1 ]; then
+        echo "    IBKR API armed: gateway is listening on :${IBG_PORT}"
+        break
+    fi
 
     if [ "$attempt" -lt "$MAX_2FA_RETRIES" ]; then
-        echo "    no approval in ${TWO_FA_WINDOW}s; restarting ibga to send a fresh push..."
+        echo "    no approval (challenge_seen=${challenge_seen}); restarting ibga to send a fresh push..."
         kill "$IBGA_PID" 2>/dev/null || true
         wait "$IBGA_PID" 2>/dev/null || true
         sleep 3

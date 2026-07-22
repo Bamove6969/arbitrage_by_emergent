@@ -87,7 +87,6 @@ export function StatTile({ label, value, detail, icon: Icon, status, className }
 
 /** Platform identity — a mono tag with a fixed accent bar, replacing gradient headers */
 const PLATFORM_ACCENT: Record<string, string> = {
-  kalshi: "hsl(var(--chart-2))",
   polymarket: "hsl(var(--chart-4))",
   predictit: "hsl(var(--chart-1))",
   ibkr: "hsl(var(--chart-3))",

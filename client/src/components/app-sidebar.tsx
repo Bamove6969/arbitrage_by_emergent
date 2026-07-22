@@ -3,7 +3,6 @@ import {
   Calculator,
   Radar,
   History,
-  CloudRain,
   FishSymbol,
   LineChart,
   Settings,
@@ -26,15 +25,14 @@ import {
 
 const mainNavItems = [
   { path: "/sentinel", label: "Arbitrage Radar", icon: Radar, index: "01" },
-  { path: "/weather", label: "Weather Terminal", icon: CloudRain, index: "02" },
-  { path: "/whales", label: "Whale Tracker", icon: FishSymbol, index: "03" },
-  { path: "/analysis", label: "ML Analysis", icon: Brain, index: "04" },
-  { path: "/pipeline", label: "Notebook Pipeline", icon: Workflow, index: "05" },
+  { path: "/whales", label: "Whale Tracker", icon: FishSymbol, index: "02" },
+  { path: "/analysis", label: "ML Analysis", icon: Brain, index: "03" },
+  { path: "/pipeline", label: "Notebook Pipeline", icon: Workflow, index: "04" },
 ];
 
 const secondaryNavItems = [
-  { path: "/", label: "Manual Calculator", icon: Calculator, index: "06" },
-  { path: "/history", label: "Trade History", icon: History, index: "07" },
+  { path: "/", label: "Manual Calculator", icon: Calculator, index: "05" },
+  { path: "/history", label: "Trade History", icon: History, index: "06" },
 ];
 
 function NavItems({ items }: { items: typeof mainNavItems }) {
