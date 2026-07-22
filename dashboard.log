@@ -292,3 +292,75 @@ Error: listen EADDRINUSE: addr3:57:23 PM [express] GET /api/scan-status 200 in 2
 [2m7:25:04 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/App.tsx, /src/index.css[22m
 [2m7:25:05 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/components/app-sidebar.tsx, /src/index.css[22m
 [2m7:25:10 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/weather.tsx, /src/index.css[22m
+Proxy error: fetch failed
+7:28:17 PM [express] GET /api/match-feedback 502 in 310311ms :: {"message":"Backend service unavailable"}
+Proxy error: fetch failed
+7:28:17 PM [express] GET /api/weather/edges 502 in 310372ms :: {"message":"Backend service unavailable"}
+Proxy error: fetch failed
+7:28:17 PM [express] GET /api/scan-progress 502 in 310484ms :: {"message":"Backend service unavailable"}
+Proxy error: fetch failed
+7:28:18 PM [express] GET /api/scan-status 502 in 310073ms :: {"message":"Backend service unavailable"}
+Proxy error: fetch failed
+7:28:20 PM [express] GET /api/kaggle-status 502 in 305138ms :: {"message":"Backend service unavailable"}
+Proxy error: fetch failed
+7:28:25 PM [express] GET /api/whales/leaderboard 502 in 304990ms :: {"message":"Backend service unavailable"}
+Proxy error: fetch failed
+7:28:42 PM [express] GET /api/kaggle-status 502 in 305143ms :: {"message":"Backend service unavailable"}
+7:28:55 PM [express] GET /api/llm-status 200 in 167675ms
+7:28:55 PM [express] GET /api/kaggle-status 200 in 147971ms
+7:28:55 PM [express] GET /api/scan-status 200 in 11953ms
+7:28:56 PM [express] GET /api/market-stats 304 in 12615ms
+7:28:56 PM [express] GET /api/kaggle-status 200 in 12943ms
+7:28:56 PM [express] GET /api/scanner-config 304 in 12947ms
+7:28:56 PM [express] GET /api/alerts 405 in 12956ms
+7:28:58 PM [express] GET /api/arbitrage-opportunities 304 in 14219ms
+7:28:58 PM [express] GET /api/kaggle-status 304 in 1503ms
+7:28:58 PM [express] GET /api/watchlist 304 in 14579ms
+7:28:58 PM [express] GET /api/match-feedback 200 in 14599ms
+7:28:58 PM [express] GET /api/kaggle-status 304 in 279ms
+7:28:59 PM [express] GET /api/ml/stats 200 in 252580ms
+7:28:59 PM [express] GET /api/kaggle-status 304 in 735ms
+7:29:04 PM [express] GET /api/kaggle-status 304 in 294ms
+7:29:08 PM [express] GET /api/kaggle-status 304 in 3ms
+7:29:13 PM [express] GET /api/arbitrage-opportunities 304 in 58ms
+7:29:13 PM [express] GET /api/kaggle-status 304 in 178ms
+7:29:19 PM [express] GET /api/kaggle-status 304 in 748ms
+7:29:23 PM [express] GET /api/kaggle-status 304 in 8ms
+7:29:28 PM [express] GET /api/arbitrage-opportunities 304 in 172ms
+7:29:28 PM [express] GET /api/kaggle-status 304 in 40ms
+7:29:33 PM [express] GET /api/kaggle-status 304 in 5ms
+7:29:38 PM [express] GET /api/kaggle-status 304 in 4ms
+7:29:48 PM [express] GET /api/kaggle-status 304 in 4307ms
+7:29:48 PM [express] GET /api/arbitrage-opportunities 304 in 4047ms
+7:29:50 PM [express] GET /api/kaggle-status 304 in 1442ms
+7:29:53 PM [express] GET /api/kaggle-status 304 in 22ms
+7:29:58 PM [express] GET /api/kaggle-status 304 in 19ms
+7:30:03 PM [express] GET /api/arbitrage-opportunities 304 in 39ms
+7:30:03 PM [express] GET /api/kaggle-status 304 in 3ms
+7:30:08 PM [express] GET /api/kaggle-status 304 in 10ms
+7:30:14 PM [express] GET /api/kaggle-status 304 in 23ms
+7:30:18 PM [express] GET /api/arbitrage-opportunities 304 in 356ms
+7:30:18 PM [express] GET /api/kaggle-status 304 in 41ms
+7:30:23 PM [express] GET /api/kaggle-status 304 in 6ms
+7:30:28 PM [express] GET /api/kaggle-status 304 in 4ms
+7:30:33 PM [express] GET /api/kaggle-status 304 in 12ms
+7:30:34 PM [express] GET /api/arbitrage-opportunities 304 in 150ms
+7:30:38 PM [express] GET /api/kaggle-status 304 in 6ms
+7:30:49 PM [express] GET /api/kaggle-status 304 in 5708ms
+7:30:49 PM [express] GET /api/kaggle-status 304 in 176ms
+7:30:49 PM [express] GET /api/arbitrage-opportunities 304 in 357ms
+7:30:53 PM [express] GET /api/kaggle-status 304 in 6ms
+7:30:58 PM [express] GET /api/kaggle-status 304 in 14ms
+7:31:03 PM [express] GET /api/kaggle-status 304 in 7ms
+7:31:05 PM [express] GET /api/arbitrage-opportunities 304 in 76ms
+7:31:08 PM [express] GET /api/kaggle-status 304 in 4ms
+7:31:13 PM [express] GET /api/kaggle-status 304 in 76ms
+7:31:18 PM [express] GET /api/kaggle-status 304 in 8ms
+7:31:20 PM [express] GET /api/arbitrage-opportunities 304 in 447ms
+7:31:25 PM [express] GET /api/whales/leaderboard 200 in 2849ms
+[2m7:31:52 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/components/app-sidebar.tsx, /src/index.css[22m
+[2m7:31:57 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/components/app-sidebar.tsx, /src/index.css[22m
+7:32:26 PM [express] GET /api/whales/leaderboard 304 in 942ms
+[2m7:32:54 PM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/whales.tsx, /src/index.css[22m
+7:32:57 PM [express] GET /api/whales/market-pools 404 in 270ms
+7:32:58 PM [express] GET /api/whales/market-pools 404 in 3ms

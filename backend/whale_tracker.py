@@ -50,6 +50,30 @@ def fetch_whale_activity(address: str, limit: int = 50) -> List[Dict[str, Any]]:
         logger.error(f"Failed to fetch activity for whale {address}: {e}")
         return []
 
+def build_market_pools(markets: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    PredictIt and IBKR do not publish trader identities, so their "whales"
+    are represented as money concentration: cached markets ranked by volume.
+    """
+    def section(platform: str) -> Dict[str, Any]:
+        rows = [m for m in markets if m.get("platform", "").lower() == platform]
+        rows.sort(key=lambda m: float(m.get("volume") or 0), reverse=True)
+        top = [{
+            "id": m.get("id"),
+            "title": m.get("title"),
+            "volume": float(m.get("volume") or 0),
+            "yesPrice": m.get("yesPrice"),
+            "endDate": m.get("endDate"),
+            "marketUrl": m.get("marketUrl"),
+        } for m in rows[:10]]
+        return {
+            "biggest": top[0] if top else None,
+            "rows": top,
+            "hasVolume": any(r["volume"] > 0 for r in top),
+        }
+
+    return {"predictit": section("predictit"), "ibkr": section("ibkr")}
+
 def get_whale_market_overlap() -> List[Dict[str, Any]]:
     """
     Aggregates the most active markets among the top whales.

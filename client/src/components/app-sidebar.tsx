@@ -23,19 +23,27 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 
-const mainNavItems = [
-  { path: "/sentinel", label: "Arbitrage Radar", icon: Radar, index: "01" },
-  { path: "/whales", label: "Whale Tracker", icon: FishSymbol, index: "02" },
-  { path: "/analysis", label: "ML Analysis", icon: Brain, index: "03" },
-  { path: "/pipeline", label: "Notebook Pipeline", icon: Workflow, index: "04" },
+interface NavItem {
+  path: string;
+  label: string;
+  icon: typeof Radar;
+  index: string;
+  accent?: string;
+}
+
+const mainNavItems: NavItem[] = [
+  { path: "/sentinel", label: "Arbitrage Radar", icon: Radar, index: "01", accent: "hsl(var(--chart-2))" },
+  { path: "/whales", label: "Whale Tracker", icon: FishSymbol, index: "02", accent: "hsl(var(--chart-5))" },
+  { path: "/analysis", label: "ML Analysis", icon: Brain, index: "03", accent: "hsl(var(--chart-4))" },
+  { path: "/pipeline", label: "Notebook Pipeline", icon: Workflow, index: "04", accent: "hsl(var(--chart-3))" },
 ];
 
-const secondaryNavItems = [
+const secondaryNavItems: NavItem[] = [
   { path: "/", label: "Manual Calculator", icon: Calculator, index: "05" },
   { path: "/history", label: "Trade History", icon: History, index: "06" },
 ];
 
-function NavItems({ items }: { items: typeof mainNavItems }) {
+function NavItems({ items }: { items: NavItem[] }) {
   const [location] = useLocation();
 
   return (
@@ -48,16 +56,21 @@ function NavItems({ items }: { items: typeof mainNavItems }) {
               <Link href={item.path}>
                 {/* active rail */}
                 <span
-                  className={`absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 bg-primary transition-all duration-200 ${
+                  className={`absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 transition-all duration-200 ${
                     isActive ? "opacity-100" : "opacity-0 group-hover/nav:opacity-40"
                   }`}
+                  style={{ backgroundColor: item.accent ?? "hsl(var(--primary))" }}
                 />
-                <item.icon strokeWidth={1.5} />
+                <item.icon
+                  strokeWidth={1.5}
+                  style={item.accent ? { color: item.accent } : undefined}
+                />
                 <span className="flex-1 font-medium">{item.label}</span>
                 <span
                   className={`font-mono text-[9px] tabular-nums tracking-widest transition-colors ${
-                    isActive ? "text-primary" : "text-muted-foreground/50"
+                    isActive ? "" : "text-muted-foreground/50"
                   }`}
+                  style={isActive ? { color: item.accent ?? "hsl(var(--primary))" } : undefined}
                 >
                   {item.index}
                 </span>

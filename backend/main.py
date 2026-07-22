@@ -1289,6 +1289,10 @@ async def get_whale_leaderboard():
 async def get_whale_activity(address: str):
     return whale_tracker.fetch_whale_activity(address)
 
+@app.get("/api/whales/market-pools")
+async def get_whale_market_pools():
+    return whale_tracker.build_market_pools(get_cached_markets())
+
 @app.get("/api/weather/edges")
 async def get_weather_edges():
     markets = get_cached_markets()
