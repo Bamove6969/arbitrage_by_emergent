@@ -2,7 +2,8 @@ import { useComparison } from '@/contexts/comparison-context';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { X, ExternalLink, ArrowLeftRight, TrendingUp, Sparkles } from 'lucide-react';
+import { PlatformTag, platformAccent } from '@/components/terminal';
+import { X, ExternalLink, ArrowLeftRight, TrendingUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface OutcomeBarProps {
@@ -13,19 +14,18 @@ interface OutcomeBarProps {
 
 function OutcomeBar({ label, percentage, isHighlighted }: OutcomeBarProps) {
   const displayPercent = Math.round(percentage * 100);
-  const barColor = isHighlighted 
-    ? 'bg-gradient-to-r from-green-500 to-emerald-400' 
-    : 'bg-gradient-to-r from-primary/60 to-primary/40';
-  
+
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between text-sm">
         <span className="truncate flex-1 font-medium">{label}</span>
-        <span className="font-mono font-bold ml-2">{displayPercent}%</span>
+        <span className={`font-mono font-bold ml-2 tabular-nums ${isHighlighted ? 'value-pos' : ''}`}>
+          {displayPercent}%
+        </span>
       </div>
-      <div className="h-2 bg-muted rounded-full overflow-hidden">
+      <div className="h-1.5 bg-muted overflow-hidden">
         <motion.div
-          className={`h-full rounded-full ${barColor}`}
+          className={`h-full ${isHighlighted ? 'bg-chart-1' : 'bg-primary/50'}`}
           initial={{ width: 0 }}
           animate={{ width: `${displayPercent}%` }}
           transition={{ duration: 0.5, ease: 'easeOut' }}
@@ -51,73 +51,43 @@ interface MarketPanelProps {
 }
 
 function MarketPanel({ market, side, onClose }: MarketPanelProps) {
-  const platformColors: Record<string, string> = {
-    Kalshi: 'from-blue-500 to-blue-600',
-    Polymarket: 'from-purple-500 to-purple-600',
-    PredictIt: 'from-green-500 to-green-600',
-  };
-
-  const gradientClass = platformColors[market.platform] || 'from-gray-500 to-gray-600';
   const hasOutcomes = market.outcomes && market.outcomes.length > 0;
-  
-  const sortedOutcomes = hasOutcomes 
+
+  const sortedOutcomes = hasOutcomes
     ? [...market.outcomes!].sort((a, b) => b.yesPrice - a.yesPrice)
     : [{ label: 'Yes', yesPrice: market.yesPrice, noPrice: market.noPrice }];
 
   return (
     <motion.div
-      initial={{ 
-        opacity: 0, 
-        scale: 0.8, 
-        x: side === 'left' ? -50 : 50,
-        y: 20 
-      }}
-      animate={{ 
-        opacity: 1, 
-        scale: 1, 
-        x: 0, 
-        y: 0 
-      }}
-      exit={{ 
-        opacity: 0, 
-        scale: 0.8, 
-        x: side === 'left' ? -50 : 50,
-        y: 20 
-      }}
-      transition={{ 
-        type: 'spring', 
-        stiffness: 300, 
-        damping: 25 
-      }}
-      className="flex-1 min-w-0 bg-card rounded-2xl border-2 shadow-2xl overflow-hidden"
+      initial={{ opacity: 0, x: side === 'left' ? -30 : 30 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: side === 'left' ? -30 : 30 }}
+      transition={{ type: 'spring', stiffness: 300, damping: 28 }}
+      className="hud-corners flex-1 min-w-0 bg-card border border-card-border overflow-hidden"
+      style={{ borderTop: `2px solid ${platformAccent(market.platform)}` }}
     >
-      <div className={`bg-gradient-to-r ${gradientClass} p-3 text-white`}>
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <Sparkles className="w-4 h-4 shrink-0" />
-            <span className="font-bold">{market.platform}</span>
-          </div>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-7 w-7 text-white hover:bg-white/20"
-            onClick={onClose}
-            data-testid={`button-close-${side}-panel`}
-          >
-            <X className="w-4 h-4" />
-          </Button>
-        </div>
+      <div className="flex items-center justify-between gap-2 border-b border-card-border p-3">
+        <PlatformTag platform={market.platform} />
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-7 w-7"
+          onClick={onClose}
+          data-testid={`button-close-${side}-panel`}
+        >
+          <X className="w-4 h-4" />
+        </Button>
       </div>
-      
-      <div className="p-3 border-b">
+
+      <div className="p-3 border-b border-card-border">
         <p className="text-sm font-medium line-clamp-2">{market.title}</p>
         {market.outcomeCount > 2 && (
-          <Badge variant="outline" className="mt-2 text-xs">
-            {market.outcomeCount} possible outcomes
+          <Badge variant="outline" className="mt-2 font-mono text-[10px] uppercase tracking-widest">
+            {market.outcomeCount} outcomes
           </Badge>
         )}
       </div>
-      
+
       <ScrollArea className="h-48">
         <div className="p-3 space-y-3">
           {sortedOutcomes.map((outcome, idx) => (
@@ -130,13 +100,13 @@ function MarketPanel({ market, side, onClose }: MarketPanelProps) {
           ))}
         </div>
       </ScrollArea>
-      
+
       {market.marketUrl && (
-        <div className="p-3 border-t bg-muted/30">
+        <div className="p-3 border-t border-card-border bg-muted/30">
           <Button
             size="sm"
             variant="outline"
-            className="w-full"
+            className="w-full font-mono text-xs uppercase tracking-widest"
             onClick={() => window.open(market.marketUrl, '_blank')}
             data-testid={`button-open-${side}-market`}
           >
@@ -145,6 +115,23 @@ function MarketPanel({ market, side, onClose }: MarketPanelProps) {
           </Button>
         </div>
       )}
+    </motion.div>
+  );
+}
+
+function EmptySlot({ side }: { side: 'left' | 'right' }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="flex-1 min-h-[200px] border border-dashed border-border flex items-center justify-center text-muted-foreground"
+    >
+      <div className="text-center p-4">
+        <TrendingUp className="w-8 h-8 mx-auto mb-2 opacity-40" strokeWidth={1.5} />
+        <p className="font-mono text-xs uppercase tracking-widest">Awaiting {side} feed</p>
+        <p className="mt-1 text-xs">Click "Compare {side}" on any market</p>
+      </div>
     </motion.div>
   );
 }
@@ -165,23 +152,24 @@ export function OutcomeComparisonDock() {
         data-testid="comparison-dock"
       >
         <div className="max-w-4xl mx-auto">
-          <div className="bg-background rounded-3xl border-2 shadow-2xl p-4">
+          <div className="tracing-beam bg-background border border-border p-4">
             <div className="flex items-center justify-between gap-2 mb-3">
-              <div className="flex items-center gap-2">
-                <ArrowLeftRight className="w-5 h-5 text-primary" />
-                <span className="font-bold">Compare Markets</span>
+              <div className="section-rule flex-1">
+                <ArrowLeftRight className="w-4 h-4 text-primary" />
+                <span className="font-mono text-xs font-bold uppercase tracking-[0.25em]">Compare markets</span>
               </div>
               <Button
                 size="sm"
                 variant="ghost"
                 onClick={clearComparison}
+                className="font-mono text-xs uppercase tracking-widest"
                 data-testid="button-clear-comparison"
               >
                 <X className="w-4 h-4 mr-1" />
                 Close
               </Button>
             </div>
-            
+
             <div className="flex gap-4">
               <AnimatePresence mode="popLayout">
                 {leftMarket ? (
@@ -192,24 +180,14 @@ export function OutcomeComparisonDock() {
                     onClose={unpinLeft}
                   />
                 ) : (
-                  <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="flex-1 min-h-[200px] rounded-2xl border-2 border-dashed flex items-center justify-center text-muted-foreground"
-                  >
-                    <div className="text-center p-4">
-                      <TrendingUp className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                      <p className="text-sm">Click "Compare Left" on any market</p>
-                    </div>
-                  </motion.div>
+                  <EmptySlot side="left" />
                 )}
               </AnimatePresence>
-              
+
               <div className="flex items-center">
                 <div className="w-px h-full bg-border" />
               </div>
-              
+
               <AnimatePresence mode="popLayout">
                 {rightMarket ? (
                   <MarketPanel
@@ -219,17 +197,7 @@ export function OutcomeComparisonDock() {
                     onClose={unpinRight}
                   />
                 ) : (
-                  <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="flex-1 min-h-[200px] rounded-2xl border-2 border-dashed flex items-center justify-center text-muted-foreground"
-                  >
-                    <div className="text-center p-4">
-                      <TrendingUp className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                      <p className="text-sm">Click "Compare Right" on any market</p>
-                    </div>
-                  </motion.div>
+                  <EmptySlot side="right" />
                 )}
               </AnimatePresence>
             </div>

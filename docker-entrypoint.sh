@@ -63,33 +63,10 @@ supervise() {
 }
 
 # ---------------------------------------------------------------------------
-# 2. Ollama
+# 2. ngrok tunnel (2-way; Colab pulls markets, pushes results back)
+#    (Ollama runs remotely on Kaggle now -- nothing to start locally.)
 # ---------------------------------------------------------------------------
-echo "[2/5] Starting Ollama (OLLAMA_HOST=${OLLAMA_HOST:-0.0.0.0:11434})..."
-supervise ollama ollama serve >> "$LOG_DIR/ollama.log" 2>&1 &
-OLLAMA_PID=$!
-for i in $(seq 1 30); do
-    if curl -sf "http://localhost:11434/api/tags" >/dev/null 2>&1; then
-        echo "    Ollama ready"; break
-    fi
-    sleep 1
-done
-
-if [ -n "${OLLAMA_MODELS}" ]; then
-    IFS=',' read -ra MODELS <<< "${OLLAMA_MODELS}"
-    for m in "${MODELS[@]}"; do
-        m_trimmed="$(echo "$m" | xargs)"
-        [ -z "$m_trimmed" ] && continue
-        echo "    Pulling Ollama model: $m_trimmed"
-        ollama pull "$m_trimmed" >> "$LOG_DIR/ollama.log" 2>&1 || \
-            echo "    WARN: failed to pull $m_trimmed (continuing)"
-    done
-fi
-
-# ---------------------------------------------------------------------------
-# 3. ngrok tunnel (2-way; Colab pulls markets, pushes results back)
-# ---------------------------------------------------------------------------
-echo "[3/5] Starting ngrok tunnel..."
+echo "[2/4] Starting ngrok tunnel..."
 if [ -n "${NGROK_AUTHTOKEN:-$NGROK_AUTH_TOKEN}" ]; then
     mkdir -p /root/.config/ngrok
     ngrok config add-authtoken "${NGROK_AUTHTOKEN:-$NGROK_AUTH_TOKEN}" \
@@ -111,7 +88,7 @@ fi
 #    Writes ~/.kaggle/kaggle.json from env vars so the CLI works without a
 #    pre-baked credential file inside the image.
 # ---------------------------------------------------------------------------
-echo "[4/5] Starting Kaggle executor..."
+echo "[3/4] Starting Kaggle executor..."
 mkdir -p /root/.kaggle
 printf '{"username":"%s","key":"%s"}\n' \
     "${KAGGLE_USERNAME:-jessefleming}" \
@@ -128,7 +105,7 @@ sleep 3
 #    TWO_FA_WINDOW seconds (default 120s) up to MAX_2FA_RETRIES attempts.
 # ---------------------------------------------------------------------------
 IBG_PORT="${IBG_PORT_INTERNAL:-4000}"
-echo "[5/5] Waiting on IBKR 2FA approval (localhost:${IBG_PORT})..."
+echo "[4/4] Waiting on IBKR 2FA approval (localhost:${IBG_PORT})..."
 
 ibga_up=0
 for attempt in $(seq 1 "$MAX_2FA_RETRIES"); do
@@ -159,7 +136,7 @@ fi
 
 # Cleanup on exit
 # Kill supervisor loops AND their supervised children
-trap 'kill $IBGA_PID $OLLAMA_PID ${NGROK_PID:-} $EXECUTOR_PID 2>/dev/null; pkill -f "ollama serve" 2>/dev/null; pkill -x ngrok 2>/dev/null || true' EXIT
+trap 'kill $IBGA_PID ${NGROK_PID:-} $EXECUTOR_PID 2>/dev/null; pkill -x ngrok 2>/dev/null || true' EXIT
 
 echo "=== Starting backend (Poly + PredictIt + IBKR x2 fan out in parallel) ==="
 exec python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000

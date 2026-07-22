@@ -5,6 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { PageHeader } from "@/components/terminal";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { 
   TrendingUp, 
@@ -439,22 +440,17 @@ export default function ArbitrageCalculator() {
   const hasPartialInput = filledSites >= 1;
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="max-w-4xl mx-auto px-4 py-8 md:py-12">
-        <header className="text-center mb-8">
-          <div className="flex items-center justify-center gap-3 mb-3">
-            <div className="p-2 rounded-lg bg-primary/10">
-              <Calculator className="w-8 h-8 text-primary" />
-            </div>
-            <h1 className="text-2xl md:text-3xl font-bold tracking-tight">
-              Arbitrage Hunter
-            </h1>
-          </div>
-          <p className="text-muted-foreground text-sm md:text-base max-w-xl mx-auto">
-            Compare prediction market prices to find guaranteed profit opportunities. 
-            Only compare identical questions with the same rules and deadlines.
-          </p>
-        </header>
+    <div className="min-h-full bg-background">
+      <div className="reveal-stack max-w-4xl mx-auto px-4 py-8 md:py-12">
+        <div className="mb-8">
+          <PageHeader
+            index="06"
+            kicker="MODULE // MANUAL CALCULATOR"
+            title="Arbitrage Hunter"
+            description="Compare identical questions across platforms to find guaranteed-profit spreads"
+            icon={Calculator}
+          />
+        </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <Card>
@@ -801,11 +797,9 @@ export default function ArbitrageCalculator() {
                         )}
                         {orderMode === "Taker" ? "Net Margin" : "Margin"}
                       </span>
-                      <span 
-                        className={`font-mono font-bold text-2xl ${
-                          result.isProfitable 
-                            ? "text-green-600 dark:text-green-400" 
-                            : "text-red-600 dark:text-red-400"
+                      <span
+                        className={`font-mono font-bold text-2xl tabular-nums ${
+                          result.isProfitable ? "value-pos" : "value-neg"
                         }`}
                         data-testid={`text-margin-${index + 1}`}
                       >

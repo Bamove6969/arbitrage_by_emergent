@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
 import { useState, useEffect } from "react";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -14,6 +14,7 @@ import SentinelPage from "@/pages/sentinel";
 import WeatherTerminalPage from "@/pages/weather";
 import WhaleTrackerPage from "@/pages/whales";
 import AnalysisPage from "@/pages/analysis";
+import PipelinePage from "@/pages/pipeline";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
@@ -28,8 +29,45 @@ function Router() {
       <Route path="/weather" component={WeatherTerminalPage} />
       <Route path="/whales" component={WhaleTrackerPage} />
       <Route path="/analysis" component={AnalysisPage} />
+      <Route path="/pipeline" component={PipelinePage} />
       <Route component={NotFound} />
     </Switch>
+  );
+}
+
+const ROUTE_LABELS: Record<string, string> = {
+  "/": "MANUAL CALC",
+  "/history": "TRADE HISTORY",
+  "/sentinel": "ARBITRAGE RADAR",
+  "/weather": "WEATHER TERMINAL",
+  "/whales": "WHALE TRACKER",
+  "/analysis": "ML ANALYSIS",
+  "/pipeline": "NOTEBOOK PIPELINE",
+};
+
+function RouteReadout() {
+  const [location] = useLocation();
+  const label = ROUTE_LABELS[location] ?? "UNKNOWN SECTOR";
+
+  return (
+    <span className="hidden font-mono text-[10px] uppercase tracking-[0.25em] text-foreground/80 lg:inline" data-testid="header-route-readout">
+      <span className="text-primary">▸</span> {label}
+    </span>
+  );
+}
+
+function UtcClock() {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  return (
+    <span className="font-mono text-[10px] tracking-widest text-muted-foreground tabular-nums hidden md:inline" data-testid="header-utc-clock">
+      {now.toISOString().slice(11, 19)} UTC
+    </span>
   );
 }
 
@@ -72,18 +110,22 @@ function App() {
           <SidebarProvider defaultOpen={true}>
             <AppSidebar />
             <SidebarInset className="bg-background flex flex-col h-screen">
-              <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b bg-background px-4">
+              <header className="scanline relative flex h-12 shrink-0 items-center justify-between gap-2 overflow-hidden border-b bg-background px-4">
                 <div className="flex items-center gap-2">
                   <SidebarTrigger className="-ml-1" data-testid="sidebar-trigger" />
                   <Separator orientation="vertical" className="mr-2 h-4 hidden md:block" />
                   <div className="font-mono text-xs uppercase tracking-[0.25em] text-muted-foreground hidden sm:block" data-testid="header-title">Arb Terminal</div>
+                  <RouteReadout />
                 </div>
-                <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                  <span className="size-1.5 rounded-full bg-chart-1 pulse-dot" />
-                  Live
+                <div className="flex items-center gap-4">
+                  <UtcClock />
+                  <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                    <span className="size-1.5 rounded-full bg-chart-1 pulse-dot" />
+                    Live
+                  </div>
                 </div>
               </header>
-              <div className="flex-1 overflow-auto pb-24">
+              <div className="terminal-grid-bg flex-1 overflow-auto pb-24">
                 <Router />
               </div>
             </SidebarInset>

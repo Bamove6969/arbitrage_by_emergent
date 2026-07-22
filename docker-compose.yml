@@ -1,7 +1,8 @@
 # Universal Arbitrage Stack
 #   docker compose up --build
 # brings up ONE container that runs IB Gateway, the FastAPI backend,
-# Ollama, ngrok, and the Playwright-driven Colab executor.
+# ngrok, and the Playwright-driven Colab executor.
+# LLM verification runs remotely (Kaggle Ollama / OpenRouter) — no local Ollama.
 services:
   universal:
     build:
@@ -18,7 +19,6 @@ services:
       - "8000:8000"    # FastAPI backend
       - "5000:5000"    # Kaggle executor
       - "4040:4040"    # ngrok inspector
-      - "11434:11434"  # Ollama API
     environment:
       # ----- IB Gateway -----
       - TERM=xterm
@@ -38,12 +38,6 @@ services:
       - LLM_PROVIDER=openrouter
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - ORACLE_EXECUTOR_URL=http://localhost:5000
-      # ----- Ollama -----
-      - OLLAMA_URL=http://localhost:11434
-      - OLLAMA_HOST=0.0.0.0:11434
-      - OLLAMA_MODELS=${OLLAMA_MODELS:-}
-      - OLLAMA_NUM_PARALLEL=2
-      - OLLAMA_MAX_LOADED_MODELS=2
       # ----- Remote verification (Session 2: Kaggle Ollama qwen3.6:27b) -----
       # REMOTE_VERIFY on  -> park the 2000 matches for the Kaggle verifier to pull
       #                      over the tailnet (set REMOTE_VERIFY=0 to revert to
@@ -88,11 +82,7 @@ services:
       - ./Ollama_Verifier_v1.ipynb:/app/Ollama_Verifier_v1.ipynb
       - ./verifier_launcher.py:/app/verifier_launcher.py
       - ./data:/app/data
-      - ollama-models:/root/.ollama
 
 networks:
   default:
     driver: bridge
-
-volumes:
-  ollama-models:

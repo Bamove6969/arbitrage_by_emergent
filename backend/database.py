@@ -145,6 +145,17 @@ async def init_db():
                 legs_json TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
+
+            CREATE TABLE IF NOT EXISTS market_price_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                match_hash TEXT NOT NULL,
+                platform TEXT NOT NULL,
+                yes_price REAL NOT NULL,
+                volume REAL DEFAULT 0,
+                timestamp TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_price_history_hash ON market_price_history(match_hash, timestamp);
         """)
         await db.commit()
 

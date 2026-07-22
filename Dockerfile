@@ -50,9 +50,6 @@ RUN ARCH="$(dpkg --print-architecture)"; \
     && tar -xzf "${NG}" -C /usr/local/bin \
     && rm "${NG}"
 
-# Ollama (installer auto-detects arch)
-RUN curl -fsSL https://ollama.com/install.sh | sh
-
 # Application
 COPY backend/ backend/
 COPY main.py .
@@ -65,18 +62,14 @@ COPY Cloud_GPU_Matcher_v3_Auto.ipynb .
 COPY AGENTS.md .
 COPY start.sh .
 
-RUN mkdir -p /app/reports /app/data /app/logs /root/.ollama
+RUN mkdir -p /app/reports /app/data /app/logs
 
-# Ports: backend, ngrok inspector, colab executor / setup page, Ollama
-EXPOSE 8000 4040 5000 11434
+# Ports: backend, ngrok inspector, colab executor / setup page
+EXPOSE 8000 4040 5000
 
 ENV PYTHONPATH=/app \
     LLM_PROVIDER=openrouter \
-    IB_GATEWAY_URL=http://localhost:4001 \
-    OLLAMA_URL=http://localhost:11434 \
-    OLLAMA_HOST=0.0.0.0:11434 \
-    OLLAMA_NUM_PARALLEL=2 \
-    OLLAMA_MAX_LOADED_MODELS=2
+    IB_GATEWAY_URL=http://localhost:4001
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=5 \
     CMD curl -f http://localhost:8000/api/health || exit 1

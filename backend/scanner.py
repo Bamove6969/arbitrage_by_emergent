@@ -9,7 +9,6 @@ from concurrent.futures import ThreadPoolExecutor
 from backend.database import get_db
 from backend.fetchers.polymarket import fetch_polymarket_markets
 from backend.fetchers.predictit import fetch_predictit_markets
-from backend.fetchers.kalshi import fetch_kalshi_markets
 
 try:
     from backend.fetchers.ibkr_public import fetch_ibkr_combined
@@ -24,7 +23,6 @@ from backend.matcher import find_arbitrage_pairs, compute_pair_arb
 
 IBKR_MODE = os.environ.get("IBKR_MODE", "auto").lower()
 POLY_LIMIT = int(os.environ.get("SCAN_POLYMARKET_LIMIT", "20000"))
-KALSHI_LIMIT = int(os.environ.get("SCAN_KALSHI_LIMIT", "10000"))
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +61,7 @@ scan_state = {
     "ibkr_scan_rounds_done": 0,  # tracks IBKR's 2-pass discovery (1=REST done, 2=TWS+REST round 2 done)
     # live per-platform "loaded" counts, filled as each fetcher finishes its pass
     # (so the UI can count up live instead of jumping at the end-of-scan merge)
-    "platform_counts": {"kalshi": 0, "polymarket": 0, "predictit": 0, "ibkr": 0},
+    "platform_counts": {"polymarket": 0, "predictit": 0, "ibkr": 0},
 }
 
 _scan_signal = asyncio.Event()
@@ -558,7 +556,7 @@ async def _fetch_with_progress(name, fetch_coro_func, results_dict):
 def _update_fetch_progress(total_expected: int):
     parts = []
     # Order them logically
-    for name in ["Kalshi", "Polymarket", "PredictIt", "IBKR"]:
+    for name in ["Polymarket", "PredictIt", "IBKR"]:
         status = _fetch_status.get(name, "waiting")
         parts.append(f"{name}: {status}")
     
@@ -598,32 +596,27 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
     scan_state["progress"] = 0
     scan_state["phase"] = "Fetching markets"
     scan_state["message"] = "Starting scan..."
-    scan_state["status"] = "scanning"
-    scan_state["total_comparisons"] = 0
-    scan_state["completed_comparisons"] = 0
-    scan_state["pairs_found"] = 0
-    scan_state["platform_counts"] = {"kalshi": 0, "polymarket": 0, "predictit": 0, "ibkr": 0}
+    scan_state["platform_counts"] = {"polymarket": 0, "predictit": 0, "ibkr": 0}
     _fetch_status.clear()
     _broadcast_state()  # Broadcast to WebSocket clients
 
     try:
         scan_state["progress"] = 3
         scan_state["phase"] = "Fetching all platforms"
-        scan_state["message"] = "Fetching Kalshi, Polymarket & PredictIt in parallel..."
+        scan_state["message"] = "Fetching Polymarket & PredictIt in parallel..."
 
         results: Dict[str, List] = {}
         fetch_tasks = []
-        
+
         # Store as lambda to defer execution (and check signature)
         # Note: Manifold removed - it's play-money only, not real funds
         platform_map = {
-            "kalshi": ("Kalshi", lambda on_progress=None: fetch_kalshi_markets(limit=KALSHI_LIMIT, on_progress=on_progress)),
             "polymarket": ("Polymarket", lambda on_progress=None: fetch_polymarket_markets(limit=POLY_LIMIT, on_progress=on_progress)),
             "predictit": ("PredictIt", lambda: fetch_predictit_markets()), # PredictIt doesn't have progress yet
             "ibkr": ("IBKR", lambda on_progress=None: fetch_ibkr_combined(on_progress=on_progress)),
         }
 
-        default_platforms = ["kalshi", "polymarket", "predictit"]
+        default_platforms = ["polymarket", "predictit"]
         if IBKR_MODE != "off" and HAS_IBKR:
             default_platforms.append("ibkr")
         active_platforms = platforms if platforms else default_platforms
@@ -661,14 +654,11 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
         )
 
 # Manifold removed - play-money only
-        kalshi_markets = results.get("Kalshi", [])
         poly_markets = results.get("Polymarket", [])
         pi_markets = results.get("PredictIt", [])
         ibkr_markets = results.get("IBKR", [])
 
         fetch_warnings = []
-        if not kalshi_markets:
-            fetch_warnings.append("Kalshi returned 0 markets")
         if not poly_markets:
             fetch_warnings.append("Polymarket returned 0 markets")
         if not pi_markets:
@@ -677,9 +667,9 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
             logger.warning(f"Partial fetch: {'; '.join(fetch_warnings)}")
 
         scan_state["progress"] = 45
-        scan_state["message"] = f"Got {len(kalshi_markets)} Kalshi + {len(poly_markets)} Polymarket + {len(pi_markets)} PredictIt. Saving to DB..."
+        scan_state["message"] = f"Got {len(poly_markets)} Polymarket + {len(pi_markets)} PredictIt. Saving to DB..."
 
-        all_markets = kalshi_markets + poly_markets + pi_markets + ibkr_markets
+        all_markets = poly_markets + pi_markets + ibkr_markets
         
         # Tag weather markets
         weather_keywords = [
@@ -770,7 +760,6 @@ async def run_scan(platforms: Optional[List[str]] = None) -> Dict[str, Any]:
             "total_markets": len(all_markets),
             "total_opportunities": len(_all_opportunities),
             "markets_by_platform": {
-                "Kalshi": len(kalshi_markets),
                 "Polymarket": len(poly_markets),
                 "PredictIt": len(pi_markets),
                 "IBKR": len(ibkr_markets),
@@ -844,6 +833,9 @@ def _row_to_market(r) -> Dict[str, Any]:
 async def save_opportunities_to_db(pairs: List[Dict[str, Any]]):
     db = await get_db()
     try:
+        # Prune old history
+        await db.execute("DELETE FROM market_price_history WHERE timestamp < datetime('now', '-30 days')")
+        
         await db.execute("DELETE FROM matched_pairs")
         for p in pairs:
             await db.execute(
@@ -862,10 +854,31 @@ async def save_opportunities_to_db(pairs: List[Dict[str, Any]]):
                     str(p.get("scenario", "")),
                 ),
             )
+            
+            # Log historical price data
+            m_a = p["marketA"]
+            m_b = p["marketB"]
+            match_hash = f"{m_a['id']}-{m_b['id']}"
+            
+            await db.execute(
+                "INSERT INTO market_price_history (match_hash, platform, yes_price, volume) VALUES (?, ?, ?, ?)",
+                (match_hash, m_a["platform"], m_a["yesPrice"], m_a.get("volume", 0))
+            )
+            await db.execute(
+                "INSERT INTO market_price_history (match_hash, platform, yes_price, volume) VALUES (?, ?, ?, ?)",
+                (match_hash, m_b["platform"], m_b["yesPrice"], m_b.get("volume", 0))
+            )
+            if p.get("marketC"):
+                m_c = p["marketC"]
+                await db.execute(
+                    "INSERT INTO market_price_history (match_hash, platform, yes_price, volume) VALUES (?, ?, ?, ?)",
+                    (match_hash, m_c["platform"], m_c["yesPrice"], m_c.get("volume", 0))
+                )
+                
         await db.commit()
-        logger.info(f"Persisted {len(pairs)} matched pairs to DB")
+        logger.info(f"Persisted {len(pairs)} matched pairs and logged historical prices to DB")
     except Exception as e:
-        logger.warning(f"Could not persist matched pairs: {e}")
+        logger.warning(f"Could not persist matched pairs and history: {e}")
     finally:
         await db.close()
 

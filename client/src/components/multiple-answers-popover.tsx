@@ -36,16 +36,16 @@ export function MultipleAnswersPopover({ answers, platformName, marketTitle }: M
           {answers.length} Answers
         </Badge>
       </PopoverTrigger>
-      <PopoverContent 
-        className="w-80 p-0 rounded-2xl shadow-xl border-2 relative"
+      <PopoverContent
+        className="hud-corners w-80 p-0 relative"
         side="top"
         align="center"
         sideOffset={12}
       >
-        <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-4 h-4 rotate-45 bg-popover border-r-2 border-b-2 border-border" />
-        
-        <div className="p-3 border-b bg-muted/30 rounded-t-2xl">
-          <p className="text-xs text-muted-foreground">{platformName}</p>
+        <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-4 h-4 rotate-45 bg-popover border-r border-b border-popover-border" />
+
+        <div className="p-3 border-b bg-muted/30">
+          <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">{platformName}</p>
           <p className="text-sm font-medium line-clamp-2">{marketTitle}</p>
         </div>
         
@@ -54,7 +54,7 @@ export function MultipleAnswersPopover({ answers, platformName, marketTitle }: M
             {answers.map((answer, index) => (
               <div 
                 key={index}
-                className="p-2 rounded-lg hover:bg-muted/50 transition-colors"
+                className="p-2 rounded-sm hover:bg-muted/50 transition-colors"
                 data-testid={`answer-item-${index}`}
               >
                 <div className="flex items-center justify-between gap-2">
@@ -79,8 +79,8 @@ export function MultipleAnswersPopover({ answers, platformName, marketTitle }: M
           </div>
         </ScrollArea>
         
-        <div className="p-2 border-t bg-muted/20 rounded-b-2xl">
-          <p className="text-xs text-center text-muted-foreground">
+        <div className="p-2 border-t bg-muted/20">
+          <p className="font-mono text-[10px] uppercase tracking-widest text-center text-muted-foreground">
             Tap outside to close
           </p>
         </div>

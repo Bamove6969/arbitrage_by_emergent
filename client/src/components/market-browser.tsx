@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +17,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Slider } from "@/components/ui/slider";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useComparison } from "@/contexts/comparison-context";
+import { BarChart, Bar, LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend, ScatterChart, Scatter } from "recharts";
 
 interface MarketBrowserProps {
   autoRefresh?: boolean;
@@ -547,6 +548,7 @@ export function MarketBrowser({
   const [activePreset, setActivePreset] = useState<string | null>(null);
   
   const [currentPage, setCurrentPage] = useState(1);
+  const [selectedHistoryOpp, setSelectedHistoryOpp] = useState<EnrichedOpportunity | null>(null);
   
   const [ratedPairs, setRatedPairs] = useState<Map<string, string>>(new Map());
   const [dismissedPairs, setDismissedPairs] = useState<Set<string>>(new Set());
@@ -1285,13 +1287,17 @@ export function MarketBrowser({
         )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="w-full grid grid-cols-2">
+          <TabsList className="w-full grid grid-cols-3">
             <TabsTrigger value="opportunities" className="min-h-[44px] px-2 sm:px-4" data-testid="tab-opportunities">
               <TrendingUp className="w-4 h-4 mr-1 sm:mr-2 shrink-0" />
               <span className="truncate">
                 <span className="hidden sm:inline">Arbitrage </span>Opportunities
               </span>
               <Badge variant="secondary" className="ml-1 sm:ml-2 shrink-0">{opportunities.length}</Badge>
+            </TabsTrigger>
+            <TabsTrigger value="visualizer" className="min-h-[44px] px-2 sm:px-4" data-testid="tab-visualizer">
+              <BarChart3 className="w-4 h-4 mr-1 sm:mr-2 shrink-0" />
+              <span>Visualizer</span>
             </TabsTrigger>
             <TabsTrigger value="all" className="min-h-[44px] px-2 sm:px-4" data-testid="tab-all-markets">
               <DollarSign className="w-4 h-4 mr-1 sm:mr-2 shrink-0" />
@@ -1343,7 +1349,7 @@ export function MarketBrowser({
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
                 <div className="flex items-center gap-2 flex-wrap">
                   <Label className="text-sm font-medium shrink-0">Sort by:</Label>
-                  <Select value={sortBy} onValueChange={(v) => { setSortBy(v as SortOption); setActivePreset(null); }}>
+                  <Select value={sortBy} onValueChange={(v: string) => { setSortBy(v as SortOption); setActivePreset(null); }}>
                     <SelectTrigger className="w-40 sm:w-48 min-h-[44px]" data-testid="select-sort">
                       <SelectValue />
                     </SelectTrigger>
@@ -1382,7 +1388,7 @@ export function MarketBrowser({
                     </div>
                     <Slider
                       value={[minRoiFilter]}
-                      onValueChange={([v]) => { setMinRoiFilter(v); setActivePreset(null); }}
+                      onValueChange={([v]: number[]) => { setMinRoiFilter(v); setActivePreset(null); }}
                       min={0}
                       max={10}
                       step={0.5}
@@ -1644,9 +1650,14 @@ export function MarketBrowser({
                                 </div>
                               </td>
                               <td className="px-3 py-2 align-top pt-3 text-center">
-                                <Button size="sm" variant="default" className="h-7 px-3 text-[11px] font-medium tracking-wide shadow-sm" onClick={() => openBothMarkets(opp.marketA.marketUrl || '', opp.marketB.marketUrl || '', toast)} disabled={!opp.marketA.marketUrl || !opp.marketB.marketUrl}>
-                                  Open Both
-                                </Button>
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <Button size="sm" variant="default" className="h-7 px-2.5 text-[11px] font-medium tracking-wide shadow-sm" onClick={() => openBothMarkets(opp.marketA.marketUrl || '', opp.marketB.marketUrl || '', toast)} disabled={!opp.marketA.marketUrl || !opp.marketB.marketUrl}>
+                                    Open Both
+                                  </Button>
+                                  <Button size="sm" variant="outline" className="h-7 px-2 text-[11px] font-medium tracking-wide shadow-sm border-indigo-500/20 hover:border-indigo-500/50 hover:bg-indigo-500/[0.04] text-indigo-600 dark:text-indigo-400" onClick={() => setSelectedHistoryOpp(opp)}>
+                                    <BarChart3 className="w-3.5 h-3.5 mr-1" /> History
+                                  </Button>
+                                </div>
                               </td>
                             </tr>
                           );
@@ -1690,6 +1701,221 @@ export function MarketBrowser({
             )}
           </TabsContent>
 
+          <TabsContent value="visualizer" className="mt-4 space-y-6">
+            {sortedOpportunities.length === 0 ? (
+              <Card className="border-dashed">
+                <CardContent className="py-12 text-center">
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="p-3 rounded-full bg-muted">
+                      <BarChart3 className="w-6 h-6 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground font-medium">
+                        No opportunities to visualize
+                      </p>
+                      <p className="text-sm text-muted-foreground/70">
+                        Try clearing search filters or scanning to find active opportunities.
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <>
+                {/* Visualizer Stat Summary */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <Card className="bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-500/10">
+                    <CardHeader className="py-3 pb-1">
+                      <CardTitle className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
+                        Highest Available ROI
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="pb-3">
+                      <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+                        {Math.max(...sortedOpportunities.map(o => o.roi)).toFixed(2)}%
+                      </div>
+                    </CardContent>
+                  </Card>
+                  
+                  <Card className="bg-sky-50/50 dark:bg-sky-950/20 border-sky-500/10">
+                    <CardHeader className="py-3 pb-1">
+                      <CardTitle className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
+                        Average Opportunity Score
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="pb-3">
+                      <div className="text-2xl font-bold text-sky-600 dark:text-sky-400">
+                        {(sortedOpportunities.reduce((acc, curr) => acc + curr.opportunityScore, 0) / sortedOpportunities.length).toFixed(1)}/100
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="bg-indigo-50/50 dark:bg-indigo-950/20 border-indigo-500/10">
+                    <CardHeader className="py-3 pb-1">
+                      <CardTitle className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
+                        Exchanges Scanned
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="pb-3">
+                      <div className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">
+                        {new Set(sortedOpportunities.flatMap(o => [o.marketA.platform, o.marketB.platform])).size} Platforms
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Primary Chart Row */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  {/* Bar Chart: ROI comparison */}
+                  <Card className="lg:col-span-2">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                        <TrendingUp className="w-4 h-4 text-emerald-500" />
+                        Top Arbitrage Opportunities by ROI
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="h-[300px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          layout="vertical"
+                          data={sortedOpportunities.slice(0, 7).map(opp => ({
+                            name: opp.marketA.title.length > 25 ? opp.marketA.title.substring(0, 25) + "..." : opp.marketA.title,
+                            fullTitle: opp.marketA.title,
+                            roi: parseFloat(opp.roi.toFixed(2)),
+                            platforms: `${opp.marketA.platform} vs ${opp.marketB.platform}`
+                          }))}
+                          margin={{ top: 10, right: 30, left: 10, bottom: 5 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                          <XAxis type="number" unit="%" />
+                          <YAxis dataKey="name" type="category" width={120} tick={{ fontSize: 11 }} />
+                          <Tooltip 
+                            formatter={(value: any, name: any, props: any) => [`${value}%`, "Net ROI"]}
+                            labelFormatter={(label, items) => items[0]?.payload?.fullTitle || label}
+                          />
+                          <Bar dataKey="roi" radius={[0, 4, 4, 0]}>
+                            {sortedOpportunities.slice(0, 7).map((opp, index) => (
+                              <Cell 
+                                key={`cell-${index}`} 
+                                fill={opp.roi >= 5 ? "#10b981" : opp.roi >= 2 ? "#14b8a6" : "#6366f1"} 
+                              />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </CardContent>
+                  </Card>
+
+                  {/* Pie Chart: Exchange Combinations */}
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                        <Layers className="w-4 h-4 text-indigo-500" />
+                        Platform Distribution
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="h-[300px] flex flex-col justify-between">
+                      <div className="flex-1 min-h-0">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={(() => {
+                                const pairsMap: Record<string, number> = {};
+                                sortedOpportunities.forEach(opp => {
+                                  const key = `${opp.marketA.platform} / ${opp.marketB.platform}`;
+                                  pairsMap[key] = (pairsMap[key] || 0) + 1;
+                                });
+                                return Object.entries(pairsMap).map(([name, value]) => ({ name, value }));
+                              })()}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={60}
+                              outerRadius={80}
+                              paddingAngle={5}
+                              dataKey="value"
+                            >
+                              {(() => {
+                                const pairsMap: Record<string, number> = {};
+                                sortedOpportunities.forEach(opp => {
+                                  const key = `${opp.marketA.platform} / ${opp.marketB.platform}`;
+                                  pairsMap[key] = (pairsMap[key] || 0) + 1;
+                                });
+                                return Object.entries(pairsMap).map((_, index) => (
+                                  <Cell key={`cell-${index}`} fill={["#6366f1", "#06b6d4", "#ec4899", "#f59e0b"][index % 4]} />
+                                ));
+                              })()}
+                            </Pie>
+                            <Tooltip formatter={(value) => [value, "Opportunities"]} />
+                            <Legend verticalAlign="bottom" height={36} iconSize={10} iconType="circle" wrapperStyle={{ fontSize: 10 }} />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Risk/Reward Scatter Map */}
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                      <Zap className="w-4 h-4 text-amber-500" />
+                      Risk / Reward Efficiency Map
+                    </CardTitle>
+                    <CardDescription className="text-xs">
+                      Sweeps match confidence against return. Target the top-right quadrant for high-confidence, high-yield trades.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="h-[350px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ScatterChart
+                        margin={{ top: 20, right: 30, bottom: 20, left: 10 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis 
+                          type="number" 
+                          dataKey="confidence" 
+                          name="Match Confidence" 
+                          unit="%" 
+                          domain={[60, 100]} 
+                          label={{ value: "Match Confidence (%)", position: "bottom", offset: 0, fontSize: 11 }}
+                        />
+                        <YAxis 
+                          type="number" 
+                          dataKey="roi" 
+                          name="Net ROI" 
+                          unit="%" 
+                          label={{ value: "Net ROI (%)", angle: -90, position: "left", offset: 0, fontSize: 11 }}
+                        />
+                        <Tooltip 
+                          cursor={{ strokeDasharray: "3 3" }} 
+                          formatter={(value: any, name: any, props: any) => [`${value}%`, name]}
+                          labelFormatter={(label) => `Opportunity`}
+                        />
+                        <Scatter 
+                          name="Opportunities" 
+                          data={sortedOpportunities.map(opp => ({
+                            confidence: opp.opportunityScore,
+                            roi: parseFloat(opp.roi.toFixed(2)),
+                            name: opp.marketA.title,
+                            isVerified: opp.isVerified
+                          }))} 
+                        >
+                          {sortedOpportunities.map((opp, index) => (
+                            <Cell 
+                              key={`cell-${index}`} 
+                              fill={opp.isVerified ? "#10b981" : "#6366f1"} 
+                              radius={6}
+                            />
+                          ))}
+                        </Scatter>
+                      </ScatterChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+              </>
+            )}
+          </TabsContent>
+
           <TabsContent value="all" className="mt-4">
             {isMarketsLoading ? (
               <div className="flex items-center justify-center py-8">
@@ -1705,7 +1931,224 @@ export function MarketBrowser({
             )}
           </TabsContent>
         </Tabs>
+
+        <Dialog open={!!selectedHistoryOpp} onOpenChange={(open: boolean) => !open && setSelectedHistoryOpp(null)}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-auto">
+            {selectedHistoryOpp && (
+              <OpportunityHistoryModal 
+                opp={selectedHistoryOpp} 
+                onClose={() => setSelectedHistoryOpp(null)} 
+              />
+            )}
+          </DialogContent>
+        </Dialog>
       </CardContent>
     </Card>
+  );
+}
+
+interface OpportunityHistoryModalProps {
+  opp: EnrichedOpportunity;
+  onClose: () => void;
+}
+
+interface LeadLagStat {
+  leader: string;
+  shift_minutes: number;
+}
+
+interface OpportunityHistoryPayload {
+  time_series: Array<Record<string, string | number>>;
+  metrics: {
+    lead_lag?: Record<string, LeadLagStat>;
+    current_z_score: number;
+    avg_roi: number;
+  };
+  platforms: string[];
+}
+
+function OpportunityHistoryModal({ opp, onClose }: OpportunityHistoryModalProps) {
+  const { data: historyData, isLoading, error } = useQuery<OpportunityHistoryPayload>({
+    queryKey: ["/api/arbitrage-opportunities/history", opp.marketA.id, opp.marketB.id],
+    queryFn: async () => {
+      const res = await fetch(`/api/arbitrage-opportunities/history?market_a_id=${opp.marketA.id}&market_b_id=${opp.marketB.id}`);
+      if (!res.ok) throw new Error("Failed to fetch historical data");
+      return res.json();
+    },
+    enabled: !!opp,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center p-12 gap-3 min-h-[300px]">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        <p className="text-sm text-muted-foreground">Running Pandas alignment engine...</p>
+      </div>
+    );
+  }
+
+  if (error || !historyData) {
+    return (
+      <div className="p-8 text-center text-destructive">
+        Failed to load historical spread analysis.
+      </div>
+    );
+  }
+
+  const { time_series, metrics, platforms } = historyData;
+
+  // Platform styling helper
+  const platformColorsMap: Record<string, string> = {
+    Polymarket: "#6366f1",
+    PredictIt: "#f59e0b",
+    IBKR: "#f43f5e",
+  };
+
+  const formatChartDate = (isoStr: string) => {
+    try {
+      const date = new Date(isoStr);
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return isoStr;
+    }
+  };
+
+  return (
+    <div className="space-y-6 py-2">
+      <div>
+        <h3 className="text-lg font-bold text-foreground leading-snug line-clamp-1">{opp.marketA.title}</h3>
+        <div className="flex flex-wrap gap-2 items-center mt-1">
+          <Badge variant="outline" className="text-[10px] font-mono">
+            {opp.marketA.platform} vs {opp.marketB.platform}
+          </Badge>
+          {opp.isVerified && (
+            <Badge className="bg-blue-600 text-white text-[9px] h-5">
+              <Zap className="w-2.5 h-2.5 mr-0.5" /> Verified
+            </Badge>
+          )}
+        </div>
+      </div>
+
+      {/* Pandas Metrics Panel */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="p-3.5 rounded-lg border bg-muted/20">
+          <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1">
+            <Zap className="w-3.5 h-3.5 text-amber-500" />
+            Lead-Lag Leader (Pandas)
+          </div>
+          <div className="text-base font-bold text-foreground mt-1">
+            {metrics.lead_lag && Object.keys(metrics.lead_lag).length > 0 ? (
+              <span className="text-indigo-600 dark:text-indigo-400">
+                {Object.values(metrics.lead_lag)[0].leader} <span className="text-xs text-muted-foreground font-medium">({Math.abs(Object.values(metrics.lead_lag)[0].shift_minutes)}m lead)</span>
+              </span>
+            ) : (
+              <span className="text-muted-foreground text-sm font-medium">In Sync / Active Discovery</span>
+            )}
+          </div>
+        </div>
+
+        <div className="p-3.5 rounded-lg border bg-muted/20">
+          <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1">
+            <Layers className="w-3.5 h-3.5 text-indigo-500" />
+            Spread Z-Score
+          </div>
+          <div className="text-base font-bold text-foreground mt-1">
+            <span className={Math.abs(metrics.current_z_score) >= 1.5 ? "text-green-600 dark:text-green-400" : ""}>
+              {metrics.current_z_score.toFixed(2)}
+            </span>
+          </div>
+        </div>
+
+        <div className="p-3.5 rounded-lg border bg-muted/20">
+          <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1">
+            <TrendingUp className="w-3.5 h-3.5 text-emerald-500" />
+            Avg Arbitrage ROI
+          </div>
+          <div className="text-base font-bold text-emerald-600 dark:text-emerald-400 mt-1">
+            +{metrics.avg_roi.toFixed(2)}% ROI
+          </div>
+        </div>
+      </div>
+
+      {/* Time Series Charts */}
+      <div className="space-y-5">
+        {/* Price Tracking Line Chart */}
+        <Card className="border shadow-none">
+          <CardHeader className="py-3 px-4 flex flex-row items-center justify-between border-b bg-muted/10">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Implied Probabilities (YES Price History)
+            </CardTitle>
+            <div className="flex gap-3 text-xs">
+              {platforms.map(p => (
+                <div key={p} className="flex items-center gap-1">
+                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: platformColorsMap[p] || "#ccc" }} />
+                  <span className="text-muted-foreground">{p}</span>
+                </div>
+              ))}
+            </div>
+          </CardHeader>
+          <CardContent className="h-[250px] p-4">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={time_series} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="timestamp" tickFormatter={formatChartDate} tick={{ fontSize: 10 }} />
+                <YAxis domain={[0.0, 1.0]} tickFormatter={(val) => `${(val * 100).toFixed(0)}¢`} tick={{ fontSize: 10 }} />
+                <Tooltip 
+                  labelFormatter={(lbl) => `Time: ${new Date(lbl).toLocaleString()}`}
+                  formatter={(val: any, name: any) => [`${(val * 100).toFixed(0)}¢`, name]}
+                />
+                {platforms.map(p => (
+                  <Line
+                    key={p}
+                    type="monotone"
+                    dataKey={p}
+                    stroke={platformColorsMap[p] || "#ccc"}
+                    strokeWidth={2}
+                    dot={false}
+                    activeDot={{ r: 4 }}
+                  />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+
+        {/* Spread Area Chart */}
+        <Card className="border shadow-none">
+          <CardHeader className="py-3 px-4 border-b bg-muted/10">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Arbitrage ROI Spread %
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="h-[150px] p-4">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={time_series} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorRoi" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/>
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0.0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="timestamp" tickFormatter={formatChartDate} tick={{ fontSize: 10 }} />
+                <YAxis tickFormatter={(val) => `${val.toFixed(1)}%`} tick={{ fontSize: 10 }} />
+                <Tooltip 
+                  labelFormatter={(lbl) => `Time: ${new Date(lbl).toLocaleString()}`}
+                  formatter={(val: any) => [`${val.toFixed(2)}%`, "Arb ROI"]}
+                />
+                <Area 
+                  type="monotone" 
+                  dataKey="roi" 
+                  stroke="#10b981" 
+                  strokeWidth={2}
+                  fillOpacity={1} 
+                  fill="url(#colorRoi)" 
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
   );
 }

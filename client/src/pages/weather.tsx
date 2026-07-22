@@ -1,5 +1,6 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CloudRain, Info, Wind, Thermometer, Droplets, TrendingUp, AlertCircle, ArrowUpRight, ArrowDownRight } from "lucide-react";
+import { PageHeader } from "@/components/terminal";
 import { MarketBrowser } from "@/components/market-browser";
 import { Badge } from "@/components/ui/badge";
 import { useQuery } from "@tanstack/react-query";
@@ -30,30 +31,24 @@ export default function WeatherTerminalPage() {
   });
 
   return (
-    <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto p-4 md:p-6 h-full">
-      <div className="flex justify-between items-start">
-        <div className="space-y-1">
-          <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent flex items-center gap-2">
-            <CloudRain className="h-8 w-8 text-cyan-400" />
-            Weather Terminal
-          </h1>
-          <p className="text-muted-foreground text-lg">
-            Directional Edge & Meteorological Arbitrage
-          </p>
-        </div>
-      </div>
+    <div className="reveal-stack flex flex-col gap-6 w-full max-w-7xl mx-auto p-4 md:p-6 h-full">
+      <PageHeader
+        index="02"
+        kicker="MODULE // WEATHER TERMINAL"
+        title="Weather Terminal"
+        description="Directional edge & meteorological arbitrage"
+        icon={CloudRain}
+      />
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Main Arbitrage Grid (2/3 width) */}
         <div className="lg:col-span-2 space-y-6">
-          <Card className="border shadow-md bg-gradient-to-br from-background to-muted/50 backdrop-blur-xl overflow-hidden">
+          <Card className="overflow-hidden">
             <CardHeader className="border-b bg-muted/20 pb-4">
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="text-xl flex items-center gap-2">
-                    <span className="bg-blue-500/20 text-blue-500 p-2 rounded-lg">
-                      <CloudRain className="h-5 w-5" />
-                    </span>
+                    <CloudRain className="h-5 w-5 text-primary" strokeWidth={1.5} />
                     Weather Arbitrage Terminal
                   </CardTitle>
                   <CardDescription>
@@ -75,10 +70,10 @@ export default function WeatherTerminalPage() {
 
         {/* Sidebar: Meteorological Edge (1/3 width) */}
         <div className="space-y-6">
-          <Card className="border shadow-md bg-gradient-to-br from-background to-muted/50 backdrop-blur-xl">
+          <Card className="scanline relative overflow-hidden">
             <CardHeader className="bg-muted/10 border-b">
               <CardTitle className="text-xl flex items-center gap-2">
-                <TrendingUp className="h-5 w-5 text-cyan-500" />
+                <TrendingUp className="h-5 w-5 text-primary" strokeWidth={1.5} />
                 Directional Edge
               </CardTitle>
               <CardDescription>

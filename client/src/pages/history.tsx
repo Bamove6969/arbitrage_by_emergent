@@ -2,10 +2,9 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { 
-  History as HistoryIcon, 
-  Trash2, 
-  ArrowLeft,
+import {
+  History as HistoryIcon,
+  Trash2,
   CircleCheck,
   CircleX,
   Calendar,
@@ -15,6 +14,7 @@ import {
   Zap
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
+import { PageHeader } from "@/components/terminal";
 import { useToast } from "@/hooks/use-toast";
 import type { ArbitrageHistory } from "@shared/schema";
 import { format } from "date-fns";
@@ -54,43 +54,31 @@ export default function HistoryPage() {
   });
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="max-w-4xl mx-auto px-4 py-8 md:py-12">
-        <header className="mb-8">
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div className="flex items-center gap-3">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => window.location.href = '/'}
-                data-testid="button-back"
-              >
-                <ArrowLeft className="w-5 h-5" />
-              </Button>
-              <div className="p-2 rounded-lg bg-primary/10">
-                <HistoryIcon className="w-6 h-6 text-primary" />
-              </div>
-              <h1 className="text-2xl font-bold tracking-tight">
-                Arbitrage History
-              </h1>
-            </div>
+    <div className="min-h-full bg-background">
+      <div className="reveal-stack max-w-4xl mx-auto px-4 py-8 md:py-12">
+        <div className="mb-8">
+          <PageHeader
+            index="07"
+            kicker="LOG // TRADE HISTORY"
+            title="Arbitrage History"
+            description="Review your saved arbitrage opportunities"
+            icon={HistoryIcon}
+          >
             {history && history.length > 0 && (
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => clearAllMutation.mutate()}
                 disabled={clearAllMutation.isPending}
+                className="font-mono text-xs uppercase tracking-widest"
                 data-testid="button-clear-all"
               >
                 <Trash2 className="w-4 h-4 mr-2" />
                 Clear All
               </Button>
             )}
-          </div>
-          <p className="text-muted-foreground text-sm mt-2 ml-12">
-            Review your saved arbitrage opportunities
-          </p>
-        </header>
+          </PageHeader>
+        </div>
 
         {isLoading && (
           <div className="space-y-4">
@@ -165,7 +153,7 @@ export default function HistoryPage() {
                       </CardTitle>
                       <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
                         <Calendar className="w-3 h-3" />
-                        {format(new Date(entry.createdAt), "MMM d, yyyy 'at' h:mm a")}
+                        {entry.createdAt ? format(new Date(entry.createdAt), "MMM d, yyyy 'at' h:mm a") : "—"}
                         <span className="mx-1">|</span>
                         {entry.orderMode === "Maker" ? (
                           <span className="flex items-center gap-1">
@@ -207,24 +195,20 @@ export default function HistoryPage() {
                     </div>
                     <div className="space-y-1">
                       <p className="text-xs text-muted-foreground">Net Profit</p>
-                      <p className={`font-mono text-sm font-bold ${
-                        entry.netProfit > 0 
-                          ? "text-green-600 dark:text-green-400" 
-                          : "text-red-600 dark:text-red-400"
+                      <p className={`font-mono text-sm font-bold tabular-nums ${
+                        (entry.netProfit ?? 0) > 0 ? "value-pos" : "value-neg"
                       }`}>
-                        {entry.netProfit > 0 ? "+" : ""}${entry.netProfit.toFixed(2)}
+                        {(entry.netProfit ?? 0) > 0 ? "+" : ""}${(entry.netProfit ?? 0).toFixed(2)}
                       </p>
                     </div>
                     <div className="space-y-1">
                       <p className="text-xs text-muted-foreground flex items-center gap-1">
                         <Percent className="w-3 h-3" /> ROI
                       </p>
-                      <p className={`font-mono text-sm font-bold ${
-                        entry.netRoi > 0 
-                          ? "text-green-600 dark:text-green-400" 
-                          : "text-red-600 dark:text-red-400"
+                      <p className={`font-mono text-sm font-bold tabular-nums ${
+                        (entry.netRoi ?? 0) > 0 ? "value-pos" : "value-neg"
                       }`}>
-                        {entry.netRoi.toFixed(2)}%
+                        {(entry.netRoi ?? 0).toFixed(2)}%
                       </p>
                     </div>
                   </div>

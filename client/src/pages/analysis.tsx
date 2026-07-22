@@ -11,6 +11,7 @@ import {
   Database, RefreshCw, Layers
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { PageHeader, StatTile } from "@/components/terminal";
 
 interface MLStats {
   feedback: Record<string, number>;
@@ -58,85 +59,68 @@ export default function AnalysisPage() {
     value
   }));
 
-  const COLORS = ['#10b981', '#ef4444', '#f59e0b', '#6366f1'];
+  // Feedback labels are states, not arbitrary series — color by meaning, never by index
+  const FEEDBACK_COLORS: Record<string, string> = {
+    approve: "hsl(144 100% 40%)",
+    reject: "hsl(3 100% 55%)",
+    unsure: "hsl(48 100% 50%)",
+  };
+  const feedbackColor = (name: string) =>
+    FEEDBACK_COLORS[name.toLowerCase().replace(" ", "_")] ?? "hsl(187 100% 42%)";
 
   return (
-    <div className="container mx-auto px-4 py-8 space-y-8">
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="text-3xl font-bold flex items-center gap-3">
-            <Brain className="w-8 h-8 text-indigo-500" />
-            ML Analysis Dashboard
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Matching engine performance and active learning loop metrics.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button 
-            variant="outline" 
-            onClick={() => refetch()} 
-            className="gap-2"
-          >
-            <RefreshCw className="w-4 h-4" />
-            Sync Stats
-          </Button>
-          <Button 
-            onClick={() => exportMutation.mutate()} 
-            disabled={exportMutation.isPending || stats.trainingSamples === 0}
-            className="gap-2 bg-indigo-600 hover:bg-indigo-700"
-          >
-            <Download className="w-4 h-4" />
-            Export Training CSV
-          </Button>
-        </div>
-      </div>
+    <div className="reveal-stack container mx-auto px-4 py-8 space-y-8">
+      <PageHeader
+        index="04"
+        kicker="MODULE // ML ANALYSIS"
+        title="ML Analysis"
+        description="Matching engine performance and active learning loop metrics"
+        icon={Brain}
+      >
+        <Button
+          variant="outline"
+          onClick={() => refetch()}
+          className="gap-2 font-mono text-xs uppercase tracking-widest"
+        >
+          <RefreshCw className="w-4 h-4" />
+          Sync Stats
+        </Button>
+        <Button
+          onClick={() => exportMutation.mutate()}
+          disabled={exportMutation.isPending || stats.trainingSamples === 0}
+          className="gap-2 font-mono text-xs uppercase tracking-widest"
+        >
+          <Download className="w-4 h-4" />
+          Export CSV
+        </Button>
+      </PageHeader>
 
-      {/* Overview Cards */}
+      {/* Overview tiles */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="bg-muted/30 border-none shadow-md">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground uppercase flex items-center gap-2">
-              <Layers className="w-4 h-4" />
-              Total Pairs Evaluated
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">{stats.totalMatches.toLocaleString()}</div>
-            <p className="text-xs text-muted-foreground mt-1">Across all recent scans</p>
-          </CardContent>
-        </Card>
-        <Card className="bg-muted/30 border-none shadow-md">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground uppercase flex items-center gap-2">
-              <Database className="w-4 h-4" />
-              Verified Samples
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-indigo-500">{stats.trainingSamples.toLocaleString()}</div>
-            <p className="text-xs text-muted-foreground mt-1">High-quality labeled data</p>
-          </CardContent>
-        </Card>
-        <Card className="bg-muted/30 border-none shadow-md">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground uppercase flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4" />
-              Precision Confidence
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-emerald-500">
-              {stats.feedback.approve ? ((stats.feedback.approve / stats.trainingSamples) * 100).toFixed(1) : "0"}%
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">Based on user approvals</p>
-          </CardContent>
-        </Card>
+        <StatTile
+          label="Total pairs evaluated"
+          value={stats.totalMatches.toLocaleString()}
+          detail="Across all recent scans"
+          icon={Layers}
+        />
+        <StatTile
+          label="Verified samples"
+          value={stats.trainingSamples.toLocaleString()}
+          detail="High-quality labeled data"
+          icon={Database}
+        />
+        <StatTile
+          label="Precision confidence"
+          value={`${stats.feedback.approve ? ((stats.feedback.approve / stats.trainingSamples) * 100).toFixed(1) : "0"}%`}
+          detail="Based on user approvals"
+          icon={CheckCircle2}
+          status="positive"
+        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* Feedback Distribution Chart */}
-        <Card className="border-none shadow-lg">
+        <Card>
           <CardHeader>
             <CardTitle>User Feedback Distribution</CardTitle>
             <CardDescription>Breakdown of labels collected for fine-tuning.</CardDescription>
@@ -144,16 +128,23 @@ export default function AnalysisPage() {
           <CardContent className="h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={feedbackData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                <XAxis dataKey="name" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
-                <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
-                <Tooltip 
-                  cursor={{fill: '#f1f5f9'}} 
-                  contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(0 0% 16%)" />
+                <XAxis dataKey="name" stroke="hsl(0 0% 62%)" fontSize={12} tickLine={false} axisLine={false} />
+                <YAxis stroke="hsl(0 0% 62%)" fontSize={12} tickLine={false} axisLine={false} />
+                <Tooltip
+                  cursor={{ fill: "hsl(0 0% 100% / 0.04)" }}
+                  contentStyle={{
+                    borderRadius: "2px",
+                    border: "1px solid hsl(0 0% 18%)",
+                    background: "hsl(0 0% 9%)",
+                    color: "hsl(0 0% 98%)",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: "12px",
+                  }}
                 />
-                <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                  {feedbackData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                <Bar dataKey="value" radius={[2, 2, 0, 0]}>
+                  {feedbackData.map((entry) => (
+                    <Cell key={entry.name} fill={feedbackColor(entry.name)} />
                   ))}
                 </Bar>
               </BarChart>
@@ -162,15 +153,15 @@ export default function AnalysisPage() {
         </Card>
 
         {/* Model Insights */}
-        <Card className="border-none shadow-lg">
+        <Card>
           <CardHeader>
             <CardTitle>Semantic Discovery</CardTitle>
             <CardDescription>How the matching engine is performing.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            <div className="flex items-start gap-4 p-4 rounded-lg bg-indigo-500/[0.03] border border-indigo-500/10">
-              <div className="bg-indigo-500/10 p-3 rounded-full">
-                <Brain className="w-6 h-6 text-indigo-500" />
+            <div className="hud-corners flex items-start gap-4 p-4 bg-accent/40 border border-primary/10">
+              <div className="bg-primary/10 p-3">
+                <Brain className="w-6 h-6 text-primary" strokeWidth={1.5} />
               </div>
               <div className="space-y-1">
                 <div className="font-semibold">Active Learning Active</div>
@@ -181,8 +172,8 @@ export default function AnalysisPage() {
             </div>
 
             <div className="space-y-3">
-              <h4 className="text-sm font-semibold text-muted-foreground uppercase flex items-center gap-2">
-                <Info className="w-4 h-4" />
+              <h4 className="section-rule font-mono text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.25em]">
+                <Info className="w-3.5 h-3.5" />
                 Discovery Pipeline
               </h4>
               <div className="space-y-2">
@@ -201,8 +192,8 @@ export default function AnalysisPage() {
               </div>
             </div>
 
-            <div className="p-4 rounded-lg bg-amber-500/[0.03] border border-amber-500/10 text-xs flex gap-2 italic">
-              <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
+            <div className="p-4 bg-chart-3/[0.04] border border-chart-3/15 text-xs flex gap-2">
+              <AlertCircle className="w-4 h-4 text-chart-3 shrink-0" />
               Tip: Export data once "Reject" count reaches 50+ to capture enough counter-examples for effective negative sampling during re-training.
             </div>
           </CardContent>
@@ -210,8 +201,7 @@ export default function AnalysisPage() {
       </div>
 
       {/* Dataset Preview / Action */}
-      <Card className="border-none shadow-lg overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/5 to-transparent pointer-events-none" />
+      <Card className="scanline relative overflow-hidden">
         <CardHeader>
           <CardTitle>Fine-Tuning Loop</CardTitle>
           <CardDescription>Bridging the local terminal with Google Colab.</CardDescription>
@@ -219,7 +209,7 @@ export default function AnalysisPage() {
         <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-8">
           <div className="space-y-4">
             <h4 className="font-semibold flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+              <CheckCircle2 className="w-4 h-4 text-chart-1" />
               1. Labeled Data
             </h4>
             <p className="text-sm text-muted-foreground leading-relaxed">
@@ -228,7 +218,7 @@ export default function AnalysisPage() {
           </div>
           <div className="space-y-4">
             <h4 className="font-semibold flex items-center gap-2">
-              <RefreshCw className="w-4 h-4 text-indigo-500" />
+              <RefreshCw className="w-4 h-4 text-primary" />
               2. GPU Training
             </h4>
             <p className="text-sm text-muted-foreground leading-relaxed">

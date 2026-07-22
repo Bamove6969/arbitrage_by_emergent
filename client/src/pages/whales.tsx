@@ -1,5 +1,6 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { FishSymbol, TrendingUp, Info, DollarSign, Activity, ExternalLink, User } from "lucide-react";
+import { PageHeader } from "@/components/terminal";
 import { useQuery } from "@tanstack/react-query";
 import { 
   Table, 
@@ -67,25 +68,21 @@ export default function WhaleTrackerPage() {
   };
 
   return (
-    <div className="flex flex-col gap-6 w-full max-w-7xl mx-auto p-4 md:p-6 h-full">
-      <div className="flex justify-between items-start">
-        <div className="space-y-1">
-          <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-emerald-400 to-teal-300 bg-clip-text text-transparent flex items-center gap-2">
-            <FishSymbol className="h-8 w-8 text-teal-400" />
-            Whale Tracker
-          </h1>
-          <p className="text-muted-foreground text-lg">
-            Inside information on the most profitable traders on Polymarket.
-          </p>
-        </div>
-      </div>
+    <div className="reveal-stack flex flex-col gap-6 w-full max-w-7xl mx-auto p-4 md:p-6 h-full">
+      <PageHeader
+        index="03"
+        kicker="MODULE // WHALE TRACKER"
+        title="Whale Tracker"
+        description="Positioning of the most profitable traders on Polymarket"
+        icon={FishSymbol}
+      />
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Leaderboard Section */}
-        <Card className="lg:col-span-2 border shadow-md bg-gradient-to-br from-background to-muted/50 backdrop-blur-xl">
+        <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle className="text-xl flex items-center gap-2">
-              <TrendingUp className="h-5 w-5 text-emerald-500" />
+              <TrendingUp className="h-5 w-5 text-chart-1" strokeWidth={1.5} />
               Top Traders (PNL)
             </CardTitle>
             <CardDescription>
@@ -152,10 +149,10 @@ export default function WhaleTrackerPage() {
         </Card>
 
         {/* Activity Section */}
-        <Card className="border shadow-md bg-gradient-to-bl from-background to-muted/50 backdrop-blur-xl">
+        <Card className="scanline relative overflow-hidden">
           <CardHeader className="border-b bg-muted/20">
             <CardTitle className="text-xl flex items-center gap-2">
-              <Activity className="h-5 w-5 text-teal-500" />
+              <Activity className="h-5 w-5 text-primary" strokeWidth={1.5} />
               Live Activity
             </CardTitle>
             <CardDescription>

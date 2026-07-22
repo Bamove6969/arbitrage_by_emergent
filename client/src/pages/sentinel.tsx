@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/terminal";
 import { Switch } from "@/components/ui/switch";
 import { 
   ArrowLeft, 
@@ -502,20 +503,21 @@ export default function SentinelPage() {
   };
 
   return (
-    <div className="container mx-auto px-4 py-6">
-      <div className="flex items-center justify-between gap-4 mb-6 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Radar className="w-6 h-6 text-primary" />
-            Arbitrage Radar
-          </h1>
-          <p className="text-sm text-muted-foreground font-mono text-xs uppercase tracking-widest">Live cross-platform scanner · watchlist · alerts</p>
-        </div>
-        {unreadAlerts.length > 0 && (
-          <Badge variant="destructive" className="animate-pulse" data-testid="badge-unread-alerts">
-            {unreadAlerts.length} alerts
-          </Badge>
-        )}
+    <div className="reveal-stack container mx-auto px-4 py-6">
+      <div className="mb-6">
+        <PageHeader
+          index="01"
+          kicker="MODULE // ARBITRAGE RADAR"
+          title="Arbitrage Radar"
+          description="Live cross-platform scanner · watchlist · alerts"
+          icon={Radar}
+        >
+          {unreadAlerts.length > 0 && (
+            <Badge variant="destructive" className="animate-pulse font-mono uppercase tracking-widest" data-testid="badge-unread-alerts">
+              {unreadAlerts.length} alerts
+            </Badge>
+          )}
+        </PageHeader>
       </div>
 
         <Card className="mb-6">
